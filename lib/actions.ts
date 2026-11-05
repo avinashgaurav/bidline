@@ -477,9 +477,9 @@ export async function submitQuestionnaireAction(ctx: ActionCtx, input: {
 /**
  * A follow-up is answered only when every item it asked about now has an
  * answer from this supplier, judged item by item: a missing or disputed price
- * is answered by a firm price in any reading so far (or an
- * explicit "not quoting"), a term by a stated, non-vague value in the latest
- * quote, a question by
+ * is answered by a firm price in the supplier's newest reading of that line (or an
+ * explicit "not quoting"), a term by a stated, non-vague value across the
+ * supplier's quotes, a question by
  * an answer, a missing certificate by an attached document. Prices carried
  * forward from an earlier revision need the supplier's confirmation, so a
  * person closes those.
@@ -488,17 +488,23 @@ async function closeAnsweredFollowUps(supplierId: string) {
   const open = await q<{ id: string; items: ChaseItem[] }>(
     `select id, items from chases where supplier_id = $1 and answered_at is null and closed_reason is null`, [supplierId]);
   if (!open.length) return;
-  const [cells, latest, reads] = await Promise.all([
+  const [cells, subs, reads] = await Promise.all([
+    // The winning reading per line, as the comparison picks it: newest revision first.
     q<{ line_no: number; raw_status: string; raw_price: number | null }>(
-      `select line_no, raw_status, raw_price from quote_cells where supplier_id = $1`, [supplierId]),
-    one<{ terms: Record<string, unknown> }>(
-      `select terms from submissions where supplier_id = $1 order by revision desc, created_at desc limit 1`, [supplierId]),
+      `select distinct on (qc.line_no) qc.line_no, qc.raw_status, qc.raw_price
+         from quote_cells qc join submissions s on s.id = qc.submission_id
+        where qc.supplier_id = $1 order by qc.line_no, s.revision desc, s.created_at desc`, [supplierId]),
+    q<{ terms: Record<string, unknown> }>(
+      `select terms from submissions where supplier_id = $1 order by revision, created_at`, [supplierId]),
     q<{ answers: Array<{ questionNo?: string; answer?: string | null; attachedDocument?: string | null }> }>(
       `select answers from questionnaire_reads where supplier_id = $1 order by created_at`, [supplierId]),
   ]);
   const firm = new Set(cells.filter((c) => c.raw_price !== null && !["omitted", "not_quoted", "illegible", "match_rival", "relative"].includes(c.raw_status)).map((c) => Number(c.line_no)));
   const declined = new Set(cells.filter((c) => c.raw_status === "not_quoted").map((c) => Number(c.line_no)));
-  const terms = latest?.terms ?? {};
+  // Terms merge across revisions the way the comparison merges them: later
+  // stated values overlay earlier ones, blanks do not erase them.
+  const terms: Record<string, unknown> = {};
+  for (const x of subs) for (const [k, v] of Object.entries(x.terms ?? {})) if (v !== null && v !== undefined && v !== "") terms[k] = v;
   // Later readings fill in earlier ones, question by question.
   const answer = new Map<string, { answer: boolean; doc: boolean }>();
   for (const r of reads) for (const a of r.answers ?? []) {
