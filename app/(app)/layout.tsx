@@ -60,7 +60,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
       <CommandMenu />
       <Suspense>
-        <FirstRun hasEvents={events.length > 0} canEdit={can(user.role, "edit")} connected={Boolean(user.last_mcp_at)} connectorUrl={`${base}/mcp/${user.mcp_token}`} />
+        <FirstRun userId={user.id} hasEvents={events.length > 0} canEdit={can(user.role, "edit")} connected={Boolean(user.last_mcp_at)} connectorUrl={`${base}/mcp/${user.mcp_token}`} />
       </Suspense>
       <LiveRefresh initial={version} />
       <BidlineAgent connected={Boolean(user.last_mcp_at)} events={events.map((e) => ({ id: e.id, code: e.code }))} />

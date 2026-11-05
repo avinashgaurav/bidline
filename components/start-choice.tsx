@@ -56,7 +56,7 @@ export function StartChoice({ heading = "How do you want to start?" }: { heading
           ) : (
             <>
               <Choice icon={<FileSpreadsheet className="size-5 text-primary" />} title="Use demo data" badge="2 minutes"
-                text="Explore with a ready-made purchase: 30 IT hardware items, 5 suppliers and 12 quote files in Excel, PDF, Word, email and a phone photo. All fictional."
+                text="Three ready-made purchases to explore: IT hardware with 12 quote files to read, office furniture already awarded, and housekeeping supplies in progress. All fictional."
                 onClick={() => setStage("demo")} />
               <Choice icon={<FolderOpen className="size-5 text-primary" />} title="Use my own files"
                 text="Set up a real purchase and upload the quotes your suppliers sent you. Only people in your workspace can see them." onClick={() => setStage("own")} />
@@ -99,13 +99,13 @@ function DemoConfirm({ back }: { back: React.ReactNode }) {
     <form action={action} className="grid gap-5">
       <div>
         {back}
-        <h2 className="mt-3 text-[24px] leading-tight">Load the demo sourcing event</h2>
+        <h2 className="mt-3 text-[24px] leading-tight">Load the demo: three sourcing events</h2>
         <p className="mt-1 text-[15px] text-ink-secondary">Here is what happens next:</p>
       </div>
       <ol className="grid gap-2.5 text-[14px]">
         {[
-          "Bidline adds an IT hardware RFQ with 30 line items and 5 suppliers.",
-          "12 supplier files arrive unread: Excel, a revised Excel, PDF, Word, an email and a phone photo.",
+          "An IT hardware RFQ with 30 line items, 5 suppliers and 12 supplier files waiting to be read: Excel, PDF, Word, an email and a phone photo.",
+          "A few seconds later, two more arrive: office furniture, already compared and approved; and housekeeping supplies, with quotes partly in and a follow-up overdue.",
           "You ask your Claude to read them. Prices fill the comparison within seconds.",
           "You check, correct, follow up and send the award for approval.",
         ].map((t, i) => (
@@ -116,8 +116,8 @@ function DemoConfirm({ back }: { back: React.ReactNode }) {
         ))}
       </ol>
       <div className="flex flex-wrap items-center gap-3">
-        <SubmitButton>Load the demo</SubmitButton>
-        <span className="text-[13px] text-ink-secondary">Takes about 20 seconds. All data is fictional.</span>
+        <SubmitButton pendingLabel="Loading the demo...">Load the demo</SubmitButton>
+        <span className="text-[13px] text-ink-secondary">Takes about 20 seconds. All companies and prices are fictional.</span>
       </div>
       <FormMessage state={state} />
     </form>
