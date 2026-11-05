@@ -8,6 +8,7 @@ import { logEvent } from "@/lib/events";
 import { BadInput, NotFound } from "@/lib/rfx";
 import * as A from "@/lib/actions";
 import { seedDemoRfx } from "@/lib/demo";
+import { disconnectEmail, getEmailAccount, saveEmailAccount, sendMail } from "@/lib/mail";
 
 export interface FormState { ok?: boolean; error?: string; message?: string; data?: Record<string, unknown> }
 
@@ -90,7 +91,7 @@ export async function loadDemoAction(): Promise<FormState> {
     rfxId = await seedDemoRfx(user.id);
   } catch (e) {
     console.error(e);
-    return { error: `Could not load the demo RFQ: ${(e as Error).message}` };
+    return { error: `Could not load the demo event: ${(e as Error).message}` };
   }
   redirect(`/rfx/${rfxId}?tab=documents`);
 }
@@ -102,11 +103,14 @@ export async function loadDemoAction(): Promise<FormState> {
 
 export async function createRfxUI(_: FormState, f: FormData): Promise<FormState> {
   const title = str(f, "title");
-  if (!title) return { error: "Enter a title for the RFQ." };
+  if (!title) return { error: "Enter a title for the event." };
   let id = "";
   const res = await act(async (ctx) => {
+    const me = await one<{ default_approver_name: string | null; default_approver_email: string | null }>(
+      "select default_approver_name, default_approver_email from users where id = $1", [ctx.userId]);
     const r = await A.createRfxAction(ctx, {
-      title, dueDate: str(f, "dueDate") || null, lines: [], approver: { name: str(f, "approver") || null },
+      title, eventType: str(f, "eventType") || "RFQ", dueDate: str(f, "dueDate") || null, lines: [],
+      approver: { name: str(f, "approver") || me?.default_approver_name || null, email: me?.default_approver_email ?? null },
     });
     id = r.rfx.id;
   });
@@ -117,6 +121,7 @@ export async function createRfxUI(_: FormState, f: FormData): Promise<FormState>
 export async function updateRfxUI(rfxId: string, _: FormState, f: FormData) {
   return act((ctx) => A.updateRfxAction(ctx, rfxId, {
     title: str(f, "title") || undefined,
+    eventType: str(f, "eventType") || undefined,
     dueDate: f.has("dueDate") ? str(f, "dueDate") || null : undefined,
     status: str(f, "status") || undefined,
     approver: f.has("approverName") ? { name: str(f, "approverName") || null, email: str(f, "approverEmail") || null } : undefined,
@@ -147,7 +152,7 @@ export async function issueRfxUI(rfxId: string, _: FormState, f: FormData): Prom
     const r = await A.issueRfxAction(ctx, rfxId, str(f, "overrideReason") || null);
     refresh();
     if (!r.issued) return { error: `Not issued: ${r.gate.length} line item${r.gate.length === 1 ? " is" : "s are"} not specific enough. Fix them, or give a reason to issue anyway.` };
-    return { ok: true, message: "RFQ issued. Suppliers are marked as invited." };
+    return { ok: true, message: "Issued. Suppliers are marked as invited." };
   } catch (e) {
     return { error: (e as Error).message };
   }
@@ -208,14 +213,16 @@ export async function addUnitRuleUI(rfxId: string, _: FormState, f: FormData) {
 export async function resolveUnmappedUI(rfxId: string, itemId: string, _: FormState, f: FormData) {
   const lineNo = numOrNull(f, "lineNo");
   return act((ctx) => A.resolveUnmappedAction(ctx, {
-    rfx: rfxId, itemId, lineNo, dismiss: !lineNo, reason: str(f, "reason") || (lineNo ? "matched by the buyer" : "not part of this RFQ"),
+    rfx: rfxId, itemId, lineNo, dismiss: !lineNo, reason: str(f, "reason") || (lineNo ? "matched by the buyer" : "not part of this event"),
   }), "Saved.");
 }
 
 export async function recordChaseUI(rfxId: string, supplier: string, _: FormState, f: FormData) {
+  const send = str(f, "intent") === "send";
   return act((ctx) => A.recordChaseAction(ctx, {
-    rfx: rfxId, supplier, dueDate: str(f, "dueDate") || null, message: str(f, "message") || null,
-  }), "Follow-up recorded. Copy the message to send it.");
+    rfx: rfxId, supplier, dueDate: str(f, "dueDate") || null, subject: str(f, "subject") || null,
+    message: str(f, "message") || null, send, to: str(f, "to") || null,
+  }), send ? "Follow-up emailed and recorded." : "Follow-up recorded. Copy the message to send it.");
 }
 
 export async function markChaseUI(rfxId: string, chaseId: string, answered: boolean) {
@@ -252,4 +259,84 @@ export async function cellHistory(rfxId: string, key: string) {
       order by id desc limit 20`,
     [rfxId, key, `%${code} %`],
   );
+}
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+export async function saveProfileUI(_: FormState, f: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const name = str(f, "name");
+  if (!name) return { error: "Enter your name." };
+  await q("update users set name = $2, company = $3, job_title = $4 where id = $1", [user.id, name, str(f, "company") || null, str(f, "jobTitle") || null]);
+  refresh();
+  return { ok: true, message: "Profile saved." };
+}
+
+export async function saveDefaultsUI(_: FormState, f: FormData): Promise<FormState> {
+  const user = await requireUser();
+  const days = Math.round(Number(str(f, "followupDays") || 3));
+  if (!(days >= 1 && days <= 30)) return { error: "Follow-up period must be between 1 and 30 days." };
+  const approverEmail = str(f, "approverEmail");
+  if (approverEmail && !/^\S+@\S+\.\S+$/.test(approverEmail)) return { error: "Enter a valid approver email, or leave it empty." };
+  await q("update users set followup_days = $2, default_approver_name = $3, default_approver_email = $4 where id = $1",
+    [user.id, days, str(f, "approverName") || null, approverEmail || null]);
+  refresh();
+  return { ok: true, message: "Defaults saved." };
+}
+
+export async function saveEmailUI(_: FormState, f: FormData): Promise<FormState> {
+  const user = await requireUser();
+  try {
+    await saveEmailAccount(user.id, {
+      provider: str(f, "provider") || "custom",
+      fromName: str(f, "fromName"), fromEmail: str(f, "fromEmail"), replyTo: str(f, "replyTo") || null,
+      host: str(f, "host"), port: Number(str(f, "port")), secure: str(f, "security") === "ssl",
+      user: str(f, "user"), password: String(f.get("password") ?? "") || null,
+      signature: String(f.get("signature") ?? "") || null, bccSelf: f.get("bccSelf") === "on",
+    });
+    await logEvent({ userId: user.id, actor: "user", kind: "email_connected", summary: `Connected ${str(f, "fromEmail")} for supplier follow-ups.` });
+    refresh();
+    return { ok: true, message: "Connected. The mail server accepted your details." };
+  } catch (e) {
+    if (e instanceof BadInput) return { error: e.message };
+    return { error: `Could not save: ${(e as Error).message}` };
+  }
+}
+
+export async function sendTestEmailUI(): Promise<FormState> {
+  const user = await requireUser();
+  const account = await getEmailAccount(user.id);
+  if (!account) return { error: "Connect your email first." };
+  try {
+    await sendMail(user.id, {
+      to: account.from_email,
+      subject: "Bidline test email",
+      text: "This is a test from Bidline. Supplier follow-ups will be sent from this mailbox, and replies will come back to you.",
+    });
+    return { ok: true, message: `Test email sent to ${account.from_email}.` };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+export async function disconnectEmailUI(): Promise<FormState> {
+  const user = await requireUser();
+  await disconnectEmail(user.id);
+  await logEvent({ userId: user.id, actor: "user", kind: "email_disconnected", summary: "Disconnected the email used for supplier follow-ups." });
+  refresh();
+  return { ok: true, message: "Email disconnected. Bidline no longer has your app password." };
+}
+
+/** Instant answers for the Ask box: worked out in code, no AI. */
+export async function askBidline(rfxId: string, question: string) {
+  const user = await requireUser();
+  const { resolveRfx } = await import("@/lib/rfx");
+  const { loadComparison } = await import("@/lib/comparison");
+  const { answer } = await import("@/lib/insights");
+  const rfx = await resolveRfx(user.id, rfxId);
+  const result = answer(await loadComparison(rfx), question);
+  await logEvent({ userId: user.id, rfxId: rfx.id, actor: "user", kind: "query", userRequest: question, summary: result ? `Asked in the app: ${result.title}.` : "Asked in the app; passed to Claude." });
+  return result;
 }

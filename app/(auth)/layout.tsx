@@ -8,7 +8,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         <div className="max-w-md">
           <p className="eyebrow !text-fog">Supplier quote comparison</p>
           <h1 className="mt-4 text-[42px] leading-[1.15]">Claude reads the quotes. Bidline does the calculations.</h1>
-          <p className="mt-5 text-[17px] leading-relaxed text-fog" style={{ fontWeight: 360 }}>
+          <p className="mt-5 text-[18px] leading-relaxed text-fog" style={{ fontWeight: 360 }}>
             Suppliers send quotes as spreadsheets, PDFs, emails and photos. Your Claude reads them. Bidline builds one
             like-for-like comparison, links every price to the supplier&apos;s document, and routes the award for
             approval.

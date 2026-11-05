@@ -22,7 +22,7 @@ export function UnitRuleForm({ rfxId, uoms }: { rfxId: string; uoms: string[] })
   return (
     <form action={action} className="grid gap-3 sm:grid-cols-[1fr_1fr_90px_1.4fr_auto] sm:items-end">
       <Field label="Supplier's unit"><input name="fromUom" required placeholder="per DIMM" className={fieldClass} /></Field>
-      <Field label="RFQ unit">
+      <Field label="requested unit">
         <select name="toUom" className={fieldClass}>{uoms.map((u) => <option key={u}>{u}</option>)}</select>
       </Field>
       <Field label="Factor"><input name="factor" required inputMode="decimal" placeholder="2" className={fieldClass} /></Field>

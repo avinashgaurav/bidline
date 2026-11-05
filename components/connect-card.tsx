@@ -19,7 +19,7 @@ export function ConnectCard({ url, connectedAt, compact = false }: { url: string
         </span>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <code className="min-w-0 flex-1 truncate rounded-lg bg-muted px-3 py-2 text-[13px]">{url}</code>
+        <code className="min-w-0 flex-1 truncate rounded-lg bg-muted px-3 py-2 text-[14px]">{url}</code>
         <CopyButton text={url} label="Copy link" variant="default" />
       </div>
       {!compact ? (

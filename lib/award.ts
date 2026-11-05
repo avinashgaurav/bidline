@@ -184,7 +184,7 @@ export function awardMarkdown(cmp: Comparison, s: AwardSnapshot, commentary: str
   out.push(`- ${s.caveatCells} awarded line${s.caveatCells === 1 ? " is" : "s are"} off-spec or conditional (substitute item, lower specification, ex-works or scope change).`);
   out.push(`- ${s.correctedCells} awarded price${s.correctedCells === 1 ? " was" : "s were"} edited by the buyer. Each edit and its reason is in the activity log.`);
   for (const f of s.fx) out.push(`- Exchange rate: 1 ${f.currency} = ₹${f.rate} (${f.source}).`);
-  if (s.gateOverride) out.push(`- The RFQ was issued with unclear line items. Reason given: "${s.gateOverride}".`);
+  if (s.gateOverride) out.push(`- The event was issued with unclear line items. Reason given: "${s.gateOverride}".`);
   out.push(`- Excluded from all totals: unreadable prices, prices where two reads disagreed, prices with no source in the supplier's document, and offers without a firm price.`);
   out.push("");
   if (commentary?.trim()) {

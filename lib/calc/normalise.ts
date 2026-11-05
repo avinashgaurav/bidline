@@ -227,10 +227,10 @@ export function normaliseCell(
   }
 
   if (raw.status === "unmapped") {
-    flags.push("Supplier's own item with no matching RFQ line");
+    flags.push("Supplier's own item with no matching line item");
     trace.push({
       rule: "No matching line",
-      basis: raw.note ?? "No RFQ line matches this item",
+      basis: raw.note ?? "No line item matches this item",
       result: "Listed under unmatched items, not matched to a line",
     });
     return out("unmapped");
@@ -313,7 +313,7 @@ export function normaliseCell(
   if (unit !== line.uom) {
     const conv = conversionFor(rules.uomConversions, unit, line.uom);
     if (!conv) {
-      flags.push(`Quoted per '${unit}', RFQ unit is '${line.uom}', and no conversion is set`);
+      flags.push(`Quoted per '${unit}', requested unit is '${line.uom}', and no conversion is set`);
       trace.push({
         rule: "No unit conversion",
         basis: `No conversion is set from '${unit}' to '${line.uom}'`,
@@ -371,7 +371,7 @@ export function normaliseCell(
   if (raw.scope_uplift_ref) {
     const ref = String(raw.scope_uplift_ref);
     const upliftRow = vendorRaw?.[ref];
-    const what = raw.scope_uplift_note ?? "scope requested in the RFQ";
+    const what = raw.scope_uplift_note ?? "scope requested";
     if (upliftRow?.price === undefined || upliftRow.price === null) {
       flags.push(
         `This price excludes ${what}, which the supplier quoted separately on ` +

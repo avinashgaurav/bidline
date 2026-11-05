@@ -65,7 +65,7 @@ export async function AwardTab({ cmp }: { cmp: Comparison }) {
             <div className="flex flex-wrap items-center gap-2">
               <code className="min-w-0 flex-1 truncate rounded-lg bg-muted px-3 py-2 text-xs">{link}</code>
               <CopyButton text={link} label="Copy approval link" />
-              <a className="inline-flex h-8 items-center rounded-full bg-secondary px-3 text-[13px]" href={`/api/rfx/${cmp.rfx.id}/export/award?award=${a.id}`}>Download .md</a>
+              <a className="inline-flex h-8 items-center rounded-full bg-secondary px-3 text-[14px]" href={`/api/rfx/${cmp.rfx.id}/export/award?award=${a.id}`}>Download .md</a>
             </div>
             <details>
               <summary className="cursor-pointer text-sm text-primary">View award note</summary>

@@ -13,6 +13,7 @@ import { chaseMessage, type ChaseKind } from "./calc/chase";
 import type { RawQuote } from "./calc/normalise";
 import type { ReadAnswer } from "./calc/questionnaire";
 import { buildAwardSnapshot, awardMarkdown, type ScenarioKey } from "./award";
+import { getEmailAccount, sendMail } from "./mail";
 
 /** Who is acting, and on whose behalf. Every action is logged with this. */
 export interface ActionCtx {
@@ -34,10 +35,16 @@ async function log(ctx: ActionCtx, rfxId: string | null, kind: string, summary: 
 // ---------------------------------------------------------------------------
 
 export async function createRfxAction(ctx: ActionCtx, input: {
-  title: string; dueDate?: string | null; buyer?: Record<string, unknown>; approver?: Record<string, unknown>;
+  title: string; eventType?: string | null; dueDate?: string | null; buyer?: Record<string, unknown>; approver?: Record<string, unknown>;
   termsAsked?: Record<string, unknown>; notes?: string | null; lines: LineInput[]; questions?: QuestionInput[];
   suppliers?: SupplierInput[];
 }) {
+  const approver = (input.approver ?? {}) as { name?: string | null; email?: string | null };
+  if (!approver.name) {
+    const me = await one<{ default_approver_name: string | null; default_approver_email: string | null }>(
+      "select default_approver_name, default_approver_email from users where id = $1", [ctx.userId]);
+    if (me?.default_approver_name) input = { ...input, approver: { name: me.default_approver_name, email: approver.email ?? me.default_approver_email } };
+  }
   const rfx = await createRfx(ctx.userId, { ...input, createdVia: ctx.actor === "claude" ? "claude" : "app" });
   for (const s of input.suppliers ?? []) await addSupplier(rfx.id, s);
   const lines = await getLines(rfx.id);
@@ -51,12 +58,15 @@ export async function createRfxAction(ctx: ActionCtx, input: {
 }
 
 export async function updateRfxAction(ctx: ActionCtx, rfxRef: string | null | undefined, patch: {
-  title?: string; dueDate?: string | null; status?: string; notes?: string | null;
+  title?: string; eventType?: string; dueDate?: string | null; status?: string; notes?: string | null;
   buyer?: Record<string, unknown>; approver?: Record<string, unknown>; termsAsked?: Record<string, unknown>;
 }) {
   const rfx = await resolveRfx(ctx.userId, rfxRef);
   const allowed = ["draft", "issued", "evaluating", "awarded", "closed"];
   if (patch.status && !allowed.includes(patch.status)) throw new BadInput(`Status must be one of ${allowed.join(", ")}.`);
+  const eventType = patch.eventType?.toUpperCase();
+  if (eventType && !["RFQ", "RFP", "RFI", "TENDER"].includes(eventType)) throw new BadInput("Event type must be RFQ, RFP, RFI or TENDER.");
+  if (eventType) await q(`update rfx set event_type = $2 where id = $1`, [rfx.id, eventType]);
   await q(
     `update rfx set
        title = coalesce($2, title), due_at = case when $3::text = '__keep' then due_at else $3::timestamptz end,
@@ -416,7 +426,7 @@ export async function submitQuestionnaireAction(ctx: ActionCtx, input: {
 }) {
   const rfx = await resolveRfx(ctx.userId, input.rfx);
   const supplier = await resolveSupplier(rfx.id, input.supplier);
-  if (supplier.status === "removed") throw new BadInput(`${supplier.name} was removed from this RFQ. Restore them on the Suppliers tab first.`);
+  if (supplier.status === "removed") throw new BadInput(`${supplier.name} was removed from this event. Restore them on the Suppliers tab first.`);
   const doc = input.documentId ? await getDocument(rfx.id, input.documentId) : null;
   await q(
     `insert into questionnaire_reads (id, rfx_id, supplier_id, document_id, answers, source) values ($1,$2,$3,$4,$5,$6)`,
@@ -443,7 +453,7 @@ export async function submitSecondReadAction(ctx: ActionCtx, input: {
 }) {
   const rfx = await resolveRfx(ctx.userId, input.rfx);
   const supplier = await resolveSupplier(rfx.id, input.supplier);
-  if (supplier.status === "removed") throw new BadInput(`${supplier.name} was removed from this RFQ. Restore them on the Suppliers tab first.`);
+  if (supplier.status === "removed") throw new BadInput(`${supplier.name} was removed from this event. Restore them on the Suppliers tab first.`);
   const cmp = await loadComparison(rfx);
   const results: Array<{ lineNo: number; first: number | null; second: number | null; agreed: boolean }> = [];
   for (const r of input.readings) {
@@ -487,7 +497,7 @@ export async function correctCellAction(ctx: ActionCtx, input: {
   if (input.price !== undefined && input.price !== null && !(Number.isFinite(input.price) && input.price > 0)) {
     throw new BadInput("A corrected price must be a number above zero. To record that the supplier declined, set the status instead.");
   }
-  if (supplier.status === "removed") throw new BadInput(`${supplier.name} was removed from this RFQ. Restore them on the Suppliers tab first.`);
+  if (supplier.status === "removed") throw new BadInput(`${supplier.name} was removed from this event. Restore them on the Suppliers tab first.`);
   const raw: RawQuote = {
     ...base,
     contested: undefined,
@@ -617,30 +627,77 @@ export async function resolveUnmappedAction(ctx: ActionCtx, input: {
 // Chasing suppliers for what they still owe
 // ---------------------------------------------------------------------------
 
-export async function recordChaseAction(ctx: ActionCtx, input: {
-  rfx?: string | null; supplier: string; dueDate?: string | null; channel?: string | null;
-  message?: string | null; onlyLines?: number[] | null; onlyQuestions?: string[] | null; kinds?: ChaseKind[] | null;
+/** The follow-up Bidline would send a supplier, without recording or sending anything. */
+export async function draftFollowUp(ctx: ActionCtx, input: {
+  rfx?: string | null; supplier: string; dueDate?: string | null;
+  onlyLines?: number[] | null; onlyQuestions?: string[] | null; kinds?: ChaseKind[] | null;
 }) {
   const rfx = await resolveRfx(ctx.userId, input.rfx);
   const supplier = await resolveSupplier(rfx.id, input.supplier);
+  const user = await one<{ name: string; followup_days: number }>("select name, followup_days from users where id = $1", [ctx.userId]);
   const cmp = await loadComparison(rfx);
-  const gaps = cmp.supplierInfo[supplier.code].gaps;
-  const due = input.dueDate || new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
+  const gaps = cmp.supplierInfo[supplier.code]?.gaps;
+  if (!gaps) throw new BadInput(`${supplier.name} is not active on ${rfx.code}.`);
+  const due = input.dueDate || new Date(Date.now() + (user?.followup_days ?? 3) * 86_400_000).toISOString().slice(0, 10);
   const drafted = chaseMessage({
-    gaps, rfxId: rfx.code, rfxTitle: rfx.title, buyerName: String((rfx.buyer as Record<string, unknown>).name ?? "Procurement"),
+    gaps, rfxId: rfx.code, rfxTitle: rfx.title,
+    buyerName: String((rfx.buyer as Record<string, unknown>).name ?? user?.name ?? "Procurement"),
     dueAt: due, selected: input.kinds ?? undefined, onlyLines: input.onlyLines ?? undefined, onlyQuestions: input.onlyQuestions ?? undefined,
   });
-  if (!drafted.items.length && !input.message) throw new BadInput(`${supplier.name} owes nothing on ${rfx.code} that a chase could ask for.`);
-  const message = input.message?.trim() || `Subject: ${drafted.subject}\n\n${drafted.body}`;
+  const contact = (supplier.contact ?? {}) as { email?: string | null };
+  const demo = rfx.created_via === "demo";
+  return { rfx, supplier, due, drafted, to: contact.email ?? null, demo };
+}
+
+/**
+ * Record a follow-up to one supplier, and send it from the buyer's own mailbox
+ * when asked. Demo suppliers are fictional, so a demo follow-up goes to the
+ * buyer's own address instead.
+ */
+export async function recordChaseAction(ctx: ActionCtx, input: {
+  rfx?: string | null; supplier: string; dueDate?: string | null; channel?: string | null;
+  subject?: string | null; message?: string | null; onlyLines?: number[] | null; onlyQuestions?: string[] | null;
+  kinds?: ChaseKind[] | null; send?: boolean; to?: string | null;
+}) {
+  const d = await draftFollowUp(ctx, input);
+  const { rfx, supplier, due, drafted } = d;
+  if (!drafted.items.length && !input.message) throw new BadInput(`${supplier.name} has nothing outstanding on ${rfx.code} to follow up.`);
+  const subject = input.subject?.trim() || drafted.subject;
+  const body = input.message?.trim() || drafted.body;
+
+  let to: string | null = null;
+  let messageId: string | null = null;
+  let sendError: string | null = null;
+  let note = "";
+  if (input.send) {
+    const account = await getEmailAccount(ctx.userId);
+    if (!account) throw new BadInput("Connect your email in Settings to send follow-ups from Bidline.");
+    to = d.demo ? account.from_email : (input.to?.trim() || d.to);
+    if (!to) throw new BadInput(`There is no email address for ${supplier.name}. Add one on the Suppliers tab, or pass the address.`);
+    if (d.demo) note = " This is a demo event with fictional suppliers, so it was sent to your own address.";
+    try {
+      messageId = await sendMail(ctx.userId, { to, subject, text: body });
+    } catch (e) {
+      sendError = (e as Error).message;
+    }
+  }
+
   const id = newId("chs");
   await q(
-    `insert into chases (id, rfx_id, supplier_id, items, message, channel, due_at, created_by) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-    [id, rfx.id, supplier.id, json(drafted.items), message, input.channel || supplier.channel || "email", due, ctx.actor],
+    `insert into chases (id, rfx_id, supplier_id, items, message, subject, to_email, sent_via, message_id, send_error, channel, due_at, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+    [
+      id, rfx.id, supplier.id, json(drafted.items), `Subject: ${subject}\n\n${body}`, subject, to,
+      messageId ? "email" : "recorded", messageId, sendError, input.channel || supplier.channel || "email", due, ctx.actor,
+    ],
   );
-  await log(ctx, rfx.id, "chase_recorded",
-    `Chased ${supplier.code} ${supplier.name} for ${drafted.items.length} item${drafted.items.length === 1 ? "" : "s"}, due ${due}. Recorded, not sent: Bidline does not deliver email yet.`,
-    { chaseId: id, items: drafted.items.map((i) => i.kind) });
-  return { rfx, supplier, chaseId: id, message, items: drafted.items, due };
+  await log(ctx, rfx.id, messageId ? "follow_up_sent" : "chase_recorded",
+    messageId
+      ? `Emailed a follow-up to ${supplier.code} ${supplier.name} at ${to} for ${drafted.items.length} item${drafted.items.length === 1 ? "" : "s"}, reply due ${due}.${note}`
+      : `Recorded a follow-up to ${supplier.code} ${supplier.name} for ${drafted.items.length} item${drafted.items.length === 1 ? "" : "s"}, reply due ${due}.${sendError ? ` Sending failed: ${sendError}` : " Not emailed."}`,
+    { chaseId: id, items: drafted.items.map((i) => i.kind), to });
+  if (sendError) throw new BadInput(`Follow-up recorded, but the email failed: ${sendError}`);
+  return { rfx, supplier, chaseId: id, subject, message: body, items: drafted.items, due, sent: Boolean(messageId), to, note };
 }
 
 export async function updateChaseAction(ctx: ActionCtx, rfxRef: string, chaseId: string, patch: { message?: string; answered?: boolean; closedReason?: string | null }) {

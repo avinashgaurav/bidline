@@ -92,7 +92,7 @@ export function DocumentRowForm({ rfxId, doc, suppliers }: {
         <option value="quotation">Quote</option>
         <option value="questionnaire">Questionnaire</option>
         <option value="certificate">Certificate or evidence</option>
-        <option value="rfx_pack">Our RFQ document</option>
+        <option value="rfx_pack">Our enquiry document</option>
         <option value="other">Other</option>
       </select>
       <select name="status" defaultValue={doc.status} className={`${fieldClass} h-8 w-auto text-xs`} aria-label="Read status">

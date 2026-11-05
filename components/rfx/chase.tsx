@@ -2,8 +2,24 @@ import type { Comparison } from "@/lib/comparison";
 import { inr } from "@/lib/view";
 import { CopyButton } from "@/components/copy-button";
 import { AnsweredToggle, ChaseForm } from "./chase-client";
+import { chaseMessage } from "@/lib/calc/chase";
+import { getEmailAccount } from "@/lib/mail";
+import { one } from "@/lib/db";
 
-export function ChaseTab({ cmp }: { cmp: Comparison }) {
+/** Reply-by date for a draft: today plus the buyer's follow-up period. */
+function daysFromToday(days: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+export async function ChaseTab({ cmp }: { cmp: Comparison }) {
+  const [account, me] = await Promise.all([
+    getEmailAccount(cmp.rfx.user_id),
+    one<{ name: string; followup_days: number }>("select name, followup_days from users where id = $1", [cmp.rfx.user_id]),
+  ]);
+  const due = daysFromToday(me?.followup_days ?? 3);
+  const demo = cmp.rfx.created_via === "demo";
   return (
     <div className="grid gap-4">
       <p className="text-sm text-ink-secondary">Open items for each supplier, with the value at stake. Bidline resolves unit and currency differences itself, so suppliers are not asked about them. Bidline records follow-ups but does not send them. Copy the message into your email or WhatsApp.</p>
@@ -30,7 +46,10 @@ export function ChaseTab({ cmp }: { cmp: Comparison }) {
             {g.resolvedWithoutAsking.length ? (
               <p className="text-xs text-ink-secondary">Resolved by Bidline: {g.resolvedWithoutAsking.map((r) => `${r.what} (lines ${r.lineNos.join(", ")})`).join("; ")}.</p>
             ) : null}
-            {g.items.length ? <ChaseForm rfxId={cmp.rfx.id} supplier={s.code} /> : null}
+            {g.items.length ? (() => {
+              const d = chaseMessage({ gaps: g, rfxId: cmp.rfx.code, rfxTitle: cmp.rfx.title, buyerName: String((cmp.rfx.buyer as { name?: string }).name ?? me?.name ?? "Procurement"), dueAt: due });
+              return <ChaseForm rfxId={cmp.rfx.id} supplier={s.code} subject={d.subject} body={d.body} to={String((s.contact as { email?: string }).email ?? "") || null} emailReady={Boolean(account)} demo={demo} />;
+            })() : null}
             {history.length ? (
               <div className="grid gap-2">
                 <p className="eyebrow">Follow-ups</p>
@@ -43,7 +62,8 @@ export function ChaseTab({ cmp }: { cmp: Comparison }) {
                       </span>
                       <span className="text-xs text-ink-secondary">{c.created_by === "claude" ? "Recorded by Claude" : "Recorded in the app"}</span>
                     </summary>
-                    <pre className="mt-3 whitespace-pre-wrap rounded-lg bg-muted p-3 font-sans text-sm">{c.message}</pre>
+                    <p className="mt-3 text-xs text-ink-secondary">{(c as { sent_via?: string }).sent_via === "email" ? `Emailed to ${(c as { to_email?: string }).to_email}` : (c as { send_error?: string }).send_error ? `Not sent: ${(c as { send_error?: string }).send_error}` : "Recorded, not emailed"}</p>
+                    <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-muted p-3 font-sans text-sm">{c.message}</pre>
                     <div className="mt-2 flex gap-2"><CopyButton text={c.message} label="Copy message" /><AnsweredToggle rfxId={cmp.rfx.id} chaseId={c.id} answered={Boolean(c.answered_at)} /></div>
                   </details>
                 ))}

@@ -41,19 +41,19 @@ export function CellDrawer({ rfxId, supplier, line, cell, isBest, onClose }: {
       <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
         <SheetHeader>
           <p className="eyebrow">{supplier.code} · {supplier.name}</p>
-          <SheetTitle className="text-[20px] font-normal">Line {line.no}: {line.desc}</SheetTitle>
-          <SheetDescription>RFQ quantity: {line.qty} × {line.uom}{line.packSize > 1 ? ` (pack size ${line.packSize})` : ""}</SheetDescription>
+          <SheetTitle className="text-[18px] font-normal">Line {line.no}: {line.desc}</SheetTitle>
+          <SheetDescription>Requested quantity: {line.qty} × {line.uom}{line.packSize > 1 ? ` (pack size ${line.packSize})` : ""}</SheetDescription>
         </SheetHeader>
 
         <div className="grid gap-6 px-4 pb-8">
           <section className="rounded-xl bg-lavender p-5">
             {cell?.unitInr !== null && cell?.unitInr !== undefined ? (
               <>
-                <p className="num text-[30px] leading-none">₹{num(cell.unitInr)} <span className="text-base text-ink-secondary">per {line.uom}</span></p>
+                <p className="num text-[28px] leading-none">₹{num(cell.unitInr)} <span className="text-base text-ink-secondary">per {line.uom}</span></p>
                 <p className="num mt-2 text-sm text-ink-secondary">₹{num(cell.extendedInr)} for {line.qty}{isBest ? " · lowest price on this line" : ""}</p>
               </>
             ) : (
-              <p className="text-[22px]">No comparable price</p>
+              <p className="text-[24px]">No comparable price</p>
             )}
             <p className="mt-3 text-sm"><b className="font-medium">{what?.label}.</b> {what?.action}</p>
           </section>

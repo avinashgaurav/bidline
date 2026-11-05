@@ -191,7 +191,7 @@
 .group-row td {
   background: var(--muted);
   font-weight: 500;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   height: 26px;
@@ -201,14 +201,23 @@
 :where(a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"]), [role="button"]):focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
-.prose-note h1 { font-size: 22px; margin: 0 0 8px; }
+.prose-note h1 { font-size: 24px; margin: 0 0 8px; }
 .prose-note h2 { font-size: 16px; margin: 20px 0 8px; font-weight: 500; }
 .prose-note p, .prose-note li { font-size: 14px; line-height: 1.55; }
 .prose-note ul { list-style: disc; padding-left: 20px; margin: 6px 0; }
-.prose-note blockquote { border-left: 3px solid var(--cell-review); background: var(--cell-review-bg); padding: 8px 12px; margin: 8px 0; font-size: 14px; }
+.prose-note blockquote { background: var(--cell-review-bg); border-radius: 8px; padding: 10px 14px; margin: 8px 0; font-size: 14px; }
 .prose-note table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 8px 0; }
 .prose-note th, .prose-note td { border-bottom: 1px solid var(--grid-line); padding: 6px 8px; text-align: left; }
 .prose-note th { background: var(--grid-head); font-weight: 500; }
+
+/* The connector line in the Connect Claude card moves while Bidline waits. */
+@keyframes dash {
+  to { stroke-dashoffset: -22; }
+}
+
+::selection {
+  background: rgba(82, 102, 235, 0.18);
+}

@@ -20,7 +20,7 @@ export function SuppliersTab({ cmp }: { cmp: Comparison }) {
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="eyebrow">{s.code} · {s.status}</p>
-                  <h3 className="mt-1 text-[20px]">{s.name}</h3>
+                  <h3 className="mt-1 text-[18px]">{s.name}</h3>
                   <p className="text-sm text-ink-secondary">{[s.city, info.vendorRef ? `quote ${info.vendorRef}` : null, info.revision > 1 ? `revision ${info.revision}` : null].filter(Boolean).join(" · ") || "No quote read yet"}</p>
                 </div>
                 {cmp.questions.length ? (

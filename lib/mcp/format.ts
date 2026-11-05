@@ -17,7 +17,7 @@ const STATUS_WORDS: Record<string, string> = {
   omitted: "missing from the quote",
   non_comparable: "no firm price (e.g. an offer to match)",
   unresolvable: "refers to data Bidline does not have",
-  unmapped: "matches no RFQ line",
+  unmapped: "matches no line item",
   not_read: "no documents read from this supplier yet",
 };
 
@@ -104,7 +104,7 @@ export function gridText(cmp: Comparison, opts: { lines?: number[]; suppliers?: 
       .sort((a, b) => a.c!.unitInr! - b.c!.unitInr!)[0];
     return `L${l.no} | ${l.sku} ${l.desc.slice(0, 40)} | ${l.qty} ${l.uom} | ${cells.join(" | ")} | ${best ? best.code : "none"}`;
   });
-  return `Landed unit price per RFQ unit, INR ex-GST. * = off-spec or conditional. Text in brackets = no comparable price.\n${head}\n${rows.join("\n")}`;
+  return `Landed unit price per requested unit, INR ex-GST. * = off-spec or conditional. Text in brackets = no comparable price.\n${head}\n${rows.join("\n")}`;
 }
 
 export function lineText(cmp: Comparison, no: number): string {
@@ -112,7 +112,7 @@ export function lineText(cmp: Comparison, no: number): string {
   if (!l) return `There is no line ${no}.`;
   const out = [
     `Line ${l.no} ${l.sku}: ${l.desc}`,
-    `RFQ quantity: ${l.qty} x ${l.uom}${l.pack_size > 1 ? ` (pack size ${l.pack_size})` : ""}. Budget ${inr(l.baseline_inr)} per ${l.uom}.`,
+    `Requested quantity: ${l.qty} x ${l.uom}${l.pack_size > 1 ? ` (pack size ${l.pack_size})` : ""}. Budget ${inr(l.baseline_inr)} per ${l.uom}.`,
     "",
   ];
   for (const s of cmp.suppliers) {
@@ -185,7 +185,7 @@ export function needsAttentionText(cmp: Comparison): string {
   }
   const open = cmp.unmapped.filter((u) => !u.resolution);
   if (open.length) {
-    out.push(`UNMATCHED ITEMS, NO RFQ LINE (${open.length})`);
+    out.push(`UNMATCHED ITEMS, NO LINE ITEM (${open.length})`);
     for (const u of open) {
       const s = cmp.suppliers.find((x) => x.id === u.supplier_id);
       out.push(`- ${u.id} from ${s?.code ?? "?"}: "${u.description}" ${u.price ?? ""} ${u.currency ?? ""} ${u.uom ?? ""}`);
@@ -194,7 +194,7 @@ export function needsAttentionText(cmp: Comparison): string {
   }
   const gate = qualityGate(cmp.lines);
   if (gate.length) {
-    out.push(`UNCLEAR RFQ LINE ITEMS (${gate.length})`);
+    out.push(`UNCLEAR LINE ITEMS (${gate.length})`);
     out.push(...gate.map((g) => `- L${g.lineNo}: ${g.issue}. Fix: ${g.fix}`));
     out.push("");
   }

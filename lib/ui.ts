@@ -64,7 +64,7 @@ export const STATUS_ACTION: Record<CellStatus, { label: string; action: string }
   },
   needs_review: {
     label: "Needs review",
-    action: "Bidline cannot convert this price to the RFQ unit. Review it. Excluded from totals.",
+    action: "Bidline cannot convert this price to the requested unit. Review it. Excluded from totals.",
   },
   unreadable: {
     label: "Unreadable",
@@ -94,7 +94,7 @@ export const STATUS_ACTION: Record<CellStatus, { label: string; action: string }
   },
   unmapped: {
     label: "No matching line",
-    action: "This item does not match any line item in the RFQ. Choose a line or exclude it.",
+    action: "This item does not match any line item in the event. Choose a line or exclude it.",
   },
 };
 

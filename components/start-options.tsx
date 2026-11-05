@@ -4,7 +4,7 @@ import { useActionState } from "react";
 import { createRfxUI, loadDemoAction, type FormState } from "@/app/actions";
 import { Field, FormMessage, SubmitButton, fieldClass } from "@/components/form-bits";
 
-export function DemoButton({ label = "Load demo RFQ", variant = "default" }: { label?: string; variant?: "default" | "outline" }) {
+export function DemoButton({ label = "Load the demo event", variant = "default" }: { label?: string; variant?: "default" | "outline" }) {
   const [state, action] = useActionState<FormState, FormData>(async () => loadDemoAction(), {});
   return (
     <form action={action} className="grid gap-2">
@@ -30,7 +30,7 @@ export function NewRfxForm() {
         </Field>
       </div>
       <FormMessage state={state} />
-      <SubmitButton variant="outline">Create RFQ</SubmitButton>
+      <SubmitButton variant="outline">Create event</SubmitButton>
     </form>
   );
 }

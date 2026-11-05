@@ -1,5 +1,6 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { userByMcpToken } from "@/lib/auth";
+import { q } from "@/lib/db";
 import { appUrlFrom } from "@/lib/app-url";
 import { buildServer } from "@/lib/mcp/server";
 
@@ -23,6 +24,11 @@ async function handle(req: Request, { params }: { params: Promise<{ token: strin
       { jsonrpc: "2.0", error: { code: -32001, message: "This Bidline connector link is not valid. Copy a fresh one from the Connect Claude page." }, id: null },
       { status: 404 },
     );
+  }
+  // Any valid call, including Claude listing the tools when the connector is
+  // added, counts as "connected" for the onboarding check.
+  if (!user.last_mcp_at || Date.now() - new Date(user.last_mcp_at).getTime() > 60_000) {
+    await q("update users set last_mcp_at = now() where id = $1", [user.id]);
   }
   const server = buildServer(user, appUrlFrom(req));
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

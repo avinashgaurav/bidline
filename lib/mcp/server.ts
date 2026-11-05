@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { signExport, type User } from "../auth";
+import { getEmailAccount } from "../mail";
 import { q } from "../db";
 import { logEvent, listEvents, transcriptMarkdown } from "../events";
 import {
@@ -13,7 +14,8 @@ import { RAW_STATUSES } from "../extract/contract";
 import { cellKey, loadComparison } from "../comparison";
 import {
   addQuestionsAction, addSuppliersAction, addUnitAliasAction, addUnitRuleAction, clearCorrectionAction,
-  correctCellAction, createAwardAction, createRfxAction, issueRfxAction, noteAssumptionAction,
+  correctCellAction, createAwardAction, createRfxAction, draftFollowUp, issueRfxAction, noteAssumptionAction,
+  updateChaseAction, updateDocumentAction,
   recordChaseAction, removeLinesAction, resolveUnmappedAction, saveTextDocumentAction, setFxRateAction,
   setPriorPoAction, submitQuestionnaireAction, submitQuoteAction, submitSecondReadAction,
   updateRfxAction, updateSupplierAction, upsertLinesAction, type ActionCtx,
@@ -27,10 +29,10 @@ type Content = McpContent;
 type ToolResult = { content: Content[]; isError?: boolean };
 
 const USER_REQUEST = z.string().optional().describe(
-  "The user's message that led to this call, quoted as closely as you can. Bidline records it in the RFQ's activity log.",
+  "The user's message that led to this call, quoted as closely as you can. Bidline records it in the event's activity log.",
 );
 const RFX = z.string().optional().describe(
-  "RFQ code (e.g. RFX-2026-0142) or id. Leave out to use the most recently updated RFQ.",
+  "Sourcing event code (e.g. RFX-2026-0142) or id. Leave out to use the most recently updated event.",
 );
 
 const text = (t: string): ToolResult => ({ content: [{ type: "text", text: t }] });
@@ -44,7 +46,8 @@ export function buildServer(user: User, appUrl: string): McpServer {
     { name: "bidline", version: "1.0.0", title: "Bidline" },
     {
       instructions:
-        "Bidline compares supplier quotes for an RFQ. You read the supplier documents and submit what they say. Bidline stores everything, " +
+        "Bidline is a procurement workspace. A sourcing event is one purchase (an RFQ by default, or an RFP, RFI or tender); users may simply call it an RFQ. " +
+        "Bidline compares supplier quotes for a sourcing event. You read the supplier documents and submit what they say. Bidline stores everything, " +
         "does every calculation (units, currency, totals, award options, questionnaire results) and updates the web app the buyer uses. " +
         "Never calculate totals or conversions yourself. Use get_comparison, compare_award_options or what_if and quote Bidline's figures. " +
         "To read supplier documents: list_documents, then read_document, then submit_quote (quotes) or submit_questionnaire (questionnaires and certificates). " +
@@ -78,7 +81,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("get_started", {
     title: "Bidline overview and workspace",
-    description: "Explains Bidline, lists the RFQs in this workspace and suggests next steps. Call this first if the user asks what Bidline can do.",
+    description: "Explains Bidline, lists the sourcing events in this workspace and suggests next steps. Call this first if the user asks what Bidline can do.",
     inputSchema: { user_request: USER_REQUEST },
     annotations: ro,
   }, async (args) => run("get_started", args, async () => {
@@ -90,7 +93,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
       "",
       rfxs.length
         ? "RFQS\n" + rfxs.map((r) => `- ${r.code} "${r.title}" [${r.status}]: ${r.line_count} line items, ${r.responded}/${r.supplier_count} suppliers quoted, ${r.unread_docs} unread documents. ${appUrl}/rfx/${r.id}`).join("\n")
-        : "No RFQs yet. Create one with create_rfx, or the user can load the demo RFQ from the dashboard.",
+        : "No sourcing events yet. Create one with create_rfx, or the user can load the demo event from the dashboard.",
       "",
       "TYPICAL FLOW",
       "1. create_rfx (lines, suppliers, questionnaire) and issue_rfx",
@@ -102,19 +105,19 @@ export function buildServer(user: User, appUrl: string): McpServer {
   }, { query: "Opened Bidline (get_started)." }));
 
   server.registerTool("list_rfxs", {
-    title: "List RFQs",
-    description: "Every RFQ in this workspace with status, suppliers who have quoted and unread documents.",
+    title: "List sourcing events",
+    description: "Every sourcing event in this workspace with its type (RFQ, RFP, RFI, tender), status, suppliers who have quoted and unread documents.",
     inputSchema: { user_request: USER_REQUEST },
     annotations: ro,
   }, async (args) => run("list_rfxs", args, async () => {
     const rfxs = await listRfxs(user.id);
-    if (!rfxs.length) return "No RFQs yet.";
-    return rfxs.map((r) => `${r.code} | ${r.title} | ${r.status} | ${r.line_count} line items | ${r.responded}/${r.supplier_count} quoted | ${r.unread_docs} unread docs | ${appUrl}/rfx/${r.id}`).join("\n");
+    if (!rfxs.length) return "No sourcing events yet.";
+    return rfxs.map((r) => `${r.code} | ${r.event_type} | ${r.title} | ${r.status} | ${r.line_count} line items | ${r.responded}/${r.supplier_count} quoted | ${r.unread_docs} unread docs | ${appUrl}/rfx/${r.id}`).join("\n");
   }));
 
   server.registerTool("get_rfx", {
-    title: "RFQ details",
-    description: "The RFQ details, every line item (item, specification, unit, pack size, quantity), the suppliers and their status, the questionnaire and any unclear line items.",
+    title: "Event details",
+    description: "The Event details, every line item (item, specification, unit, pack size, quantity), the suppliers and their status, the questionnaire and any unclear line items.",
     inputSchema: { rfx: RFX, user_request: USER_REQUEST },
     annotations: ro,
   }, async (args) => run("get_rfx", args, async () => {
@@ -136,7 +139,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
       questionCatalogText(cmp.questions),
       gate.length ? "\nUNCLEAR LINE ITEMS\n" + gate.map((g) => `L${g.lineNo}: ${g.issue}`).join("\n") : "",
     ].filter((x) => x !== "").join("\n");
-  }, { query: "Viewed the RFQ details.", rfx: args.rfx ?? "" }));
+  }, { query: "Viewed the Event details.", rfx: args.rfx ?? "" }));
 
   // -------------------------------------------------------------------------
   // Creating and editing an enquiry
@@ -172,10 +175,11 @@ export function buildServer(user: User, appUrl: string): McpServer {
   });
 
   server.registerTool("create_rfx", {
-    title: "Create an RFQ",
-    description: "Create a new RFQ from what the user needs to buy: title, line items, and optionally suppliers to invite and a supplier questionnaire. Returns the RFQ code, any unclear line items, and the link to open it in the app.",
+    title: "Create a sourcing event",
+    description: "Create a new sourcing event (an RFQ by default; RFP, RFI or tender if the user says so) from what the user needs to buy: title, line items, and optionally suppliers to invite and a supplier questionnaire. Returns the event code, any unclear line items, and the link to open it in the app.",
     inputSchema: {
       title: z.string(),
+      eventType: z.enum(["RFQ", "RFP", "RFI", "TENDER"]).optional().describe("Default RFQ."),
       dueDate: z.string().optional().describe("Quote due date, YYYY-MM-DD."),
       buyerName: z.string().optional(),
       buyerEmail: z.string().optional(),
@@ -191,7 +195,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
     annotations: rw,
   }, async (args) => run("create_rfx", args, async (ctx) => {
     const { rfx, lines, gate } = await createRfxAction(ctx, {
-      title: args.title, dueDate: args.dueDate ?? null,
+      title: args.title, eventType: args.eventType ?? "RFQ", dueDate: args.dueDate ?? null,
       buyer: { name: args.buyerName ?? user.name, email: args.buyerEmail ?? user.email },
       approver: { name: args.approverName ?? null, email: args.approverEmail ?? null },
       termsAsked: args.termsAsked ?? {}, notes: args.notes ?? null,
@@ -207,11 +211,12 @@ export function buildServer(user: User, appUrl: string): McpServer {
   }));
 
   server.registerTool("update_rfx", {
-    title: "Update RFQ details",
-    description: "Change the title, due date, status, buyer, approver, terms requested or notes of an RFQ.",
+    title: "Update Event details",
+    description: "Change the title, due date, status, buyer, approver, terms requested or notes of a sourcing event.",
     inputSchema: {
       rfx: RFX,
       title: z.string().optional(),
+      eventType: z.enum(["RFQ", "RFP", "RFI", "TENDER"]).optional(),
       dueDate: z.string().optional().describe("YYYY-MM-DD"),
       status: z.enum(["draft", "issued", "evaluating", "awarded", "closed"]).optional(),
       approverName: z.string().optional(),
@@ -223,7 +228,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
     annotations: rw,
   }, async (args) => run("update_rfx", args, async (ctx) => {
     const r = await updateRfxAction(ctx, args.rfx, {
-      title: args.title, dueDate: args.dueDate, status: args.status, notes: args.notes, termsAsked: args.termsAsked,
+      title: args.title, eventType: args.eventType, dueDate: args.dueDate, status: args.status, notes: args.notes, termsAsked: args.termsAsked,
       approver: args.approverName || args.approverEmail ? { ...(args.approverName ? { name: args.approverName } : {}), ...(args.approverEmail ? { email: args.approverEmail } : {}) } : undefined,
     });
     return `Updated ${r.code}. ${appUrl}/rfx/${r.id}`;
@@ -265,8 +270,8 @@ export function buildServer(user: User, appUrl: string): McpServer {
   }));
 
   server.registerTool("issue_rfx", {
-    title: "Issue the RFQ",
-    description: "Mark the RFQ as issued to its suppliers. Bidline holds it while any line item is unclear, unless a reason is given. The reason is shown in the award note. Bidline records the issue but does not send emails.",
+    title: "Issue the event",
+    description: "Mark the event as issued to its suppliers. Bidline holds it while any line item is unclear, unless a reason is given. The reason is shown in the award note. Bidline records the issue but does not send emails.",
     inputSchema: { rfx: RFX, overrideReason: z.string().optional(), user_request: USER_REQUEST },
     annotations: rw,
   }, async (args) => run("issue_rfx", args, async (ctx) => {
@@ -274,12 +279,12 @@ export function buildServer(user: User, appUrl: string): McpServer {
     if (!r.issued) {
       return `Not issued: ${r.gate.length} line item${r.gate.length === 1 ? " is" : "s are"} unclear.\n${r.gate.map((g) => `- L${g.lineNo}: ${g.issue}. Fix: ${g.fix}`).join("\n")}\nFix with upsert_lines, or call issue_rfx again with overrideReason.`;
     }
-    return `${r.rfx.code} is issued. Suppliers are marked as invited. Bidline does not send emails, so send the RFQ to suppliers yourself. ${appUrl}/rfx/${r.rfx.id}`;
+    return `${r.rfx.code} is issued. Suppliers are marked as invited. Bidline does not send emails, so send the event to suppliers yourself. ${appUrl}/rfx/${r.rfx.id}`;
   }));
 
   server.registerTool("add_suppliers", {
     title: "Add suppliers",
-    description: "Add suppliers to an RFQ. Each gets a code (V1, V2...) used in all other tools.",
+    description: "Add suppliers to a sourcing event. Each gets a code (V1, V2...) used in all other tools.",
     inputSchema: { rfx: RFX, suppliers: z.array(SUPPLIER).min(1), user_request: USER_REQUEST },
     annotations: rw,
   }, async (args) => run("add_suppliers", args, async (ctx) => {
@@ -311,7 +316,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("list_documents", {
     title: "List supplier documents",
-    description: "Files on an RFQ (uploaded in the app or saved from chat): id, file name, supplier, type (quotation, questionnaire, certificate) and read status.",
+    description: "Files on a sourcing event (uploaded in the app or saved from chat): id, file name, supplier, type (quotation, questionnaire, certificate) and read status.",
     inputSchema: { rfx: RFX, unreadOnly: z.boolean().optional(), user_request: USER_REQUEST },
     annotations: ro,
   }, async (args) => run("list_documents", args, async () => {
@@ -321,11 +326,11 @@ export function buildServer(user: User, appUrl: string): McpServer {
     return `${rfx.code} documents (newest first):\n` + docs.map((d) =>
       `- ${d.id} | ${d.filename} | ${d.kind} | ${d.supplier_code ? `${d.supplier_code} ${d.supplier_name}` : "supplier unknown"} | ${d.status} | ${Math.round(d.byte_size / 1024)} KB`).join("\n") +
       "\nRead one with read_document.";
-  }, { query: "Listed the RFQ's documents.", rfx: args.rfx ?? "" }));
+  }, { query: "Listed the event's documents.", rfx: args.rfx ?? "" }));
 
   server.registerTool("read_document", {
     title: "Open a supplier document",
-    description: "Returns a stored document's contents for you to read (spreadsheet cells with addresses, PDF text with page and line numbers, Word paragraphs, email body, or the photo), with the RFQ line catalog and the reading rules. Then call submit_quote or submit_questionnaire with its documentId.",
+    description: "Returns a stored document's contents for you to read (spreadsheet cells with addresses, PDF text with page and line numbers, Word paragraphs, email body, or the photo), with the line item catalog and the reading rules. Then call submit_quote or submit_questionnaire with its documentId.",
     inputSchema: {
       rfx: RFX,
       document: z.string().optional().describe("Document id or filename. Leave out to open the oldest unread document."),
@@ -362,7 +367,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("save_document_text", {
     title: "Save chat text as a document",
-    description: "Save text from this chat (for example an email the user pasted) as a document on the RFQ, so prices read from it link back to it. Returns a documentId to pass to submit_quote.",
+    description: "Save text from this chat (for example an email the user pasted) as a document on the event, so prices read from it link back to it. Returns a documentId to pass to submit_quote.",
     inputSchema: {
       rfx: RFX, filename: z.string().describe("A short name, e.g. helios-email-17-sep.txt"), text: z.string(),
       supplier: z.string().optional(), kind: z.enum(["quotation", "questionnaire", "certificate", "other"]).optional(),
@@ -381,18 +386,18 @@ export function buildServer(user: User, appUrl: string): McpServer {
     page: z.number().int().positive().nullish(),
   });
   const ROW = z.object({
-    rfxLineNo: z.number().int().positive().nullable().describe("The RFQ line this matches, or null if none. Do not match it to the nearest line."),
+    rfxLineNo: z.number().int().positive().nullable().describe("The line item this matches, or null if none. Do not match it to the nearest line."),
     vendorDescription: z.string().describe("How the supplier described the item."),
     status: z.enum(RAW_STATUSES).describe("quoted | substituted (different make) | downgraded (lower spec) | uom_mismatch | bundled | moq_adjusted | relative (refers to a previous order) | match_rival | illegible | not_quoted (explicit decline). Use illegible rather than guessing."),
     price: z.number().nullish().describe("As written, in the supplier's unit and currency. Do not convert, multiply by pack size or apply discounts."),
     uom: z.string().nullish().describe("The unit they priced in, in their words: 'per pc', 'box of 10', 'per DIMM'."),
     currency: z.string().nullish().describe("ISO code, INR or USD..."),
-    qty: z.number().int().nullish().describe("Quantity the supplier quoted, if different from the RFQ."),
+    qty: z.number().int().nullish().describe("Quantity the supplier quoted, if different from the request."),
     printedPrice: z.number().nullish().describe("A printed price crossed out and replaced by hand."),
     handwritten: z.boolean().nullish(),
     offeredMakeModel: z.string().nullish(),
     note: z.string().nullish().describe("MOQs, free goods, warranty scope, conditions, 'ex-works'."),
-    scopeUpliftRef: z.string().nullish().describe("If this price excludes something the RFQ asked for, which the supplier priced on another of their lines, that line's label (e.g. '30A')."),
+    scopeUpliftRef: z.string().nullish().describe("If this price excludes something the event asked for, which the supplier priced on another of their lines, that line's label (e.g. '30A')."),
     scopeUpliftNote: z.string().nullish(),
     reference: z.object({
       basis: z.enum(["prior_po", "prior_po_uplift", "match_rival", "other"]),
@@ -407,7 +412,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
     description: "Store what you read from one supplier quote: one row per item, each with the price exactly as written and the supplier's text. Bidline validates it, converts units and currency, calculates landed prices, and updates the comparison and the app. Returns the result for each line and what needs review.",
     inputSchema: {
       rfx: RFX,
-      supplier: z.string().describe("Supplier code (V2), name, or id. A name not on the RFQ is added as a new supplier."),
+      supplier: z.string().describe("Supplier code (V2), name, or id. A name not on the event is added as a new supplier."),
       documentId: z.string().optional().describe("The document you read, from list_documents or save_document_text. Leave out only if the user attached the file in chat and there is no stored copy."),
       vendorRef: z.string().nullish().describe("The supplier's quote number."),
       supersedesRef: z.string().nullish().describe("If this replaces an earlier quote, that quote's number."),
@@ -448,7 +453,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
       .map(({ l, c }) => `- L${l.no}: ${statusWords(c!.status)}. ${c!.flags[0] ?? ""}`);
     const single = r.cmp.supplierInfo[code].single;
     return [
-      `Stored ${r.cells} line${r.cells === 1 ? "" : "s"} from ${code} ${r.supplier.name}${r.revision > 1 ? ` as revision ${r.revision}` : ""}${r.unmapped ? `, plus ${r.unmapped} item${r.unmapped === 1 ? "" : "s"} with no matching RFQ line (listed separately, not matched to a line)` : ""}.`,
+      `Stored ${r.cells} line${r.cells === 1 ? "" : "s"} from ${code} ${r.supplier.name}${r.revision > 1 ? ` as revision ${r.revision}` : ""}${r.unmapped ? `, plus ${r.unmapped} item${r.unmapped === 1 ? "" : "s"} with no matching line item (listed separately, not matched to a line)` : ""}.`,
       r.issues.length ? `Validation changed ${r.issues.length} row${r.issues.length === 1 ? "" : "s"}:\n${r.issues.map((i) => `- row ${i.rowIndex + 1}: ${i.reason}`).join("\n")}` : "",
       ...r.fxNotes,
       `Line results: ${Object.entries(counts).map(([k, v]) => `${v} ${statusWords(k)}`).join(", ")}.`,
@@ -535,7 +540,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("get_line", {
     title: "One line item across suppliers",
-    description: "One RFQ line item: each supplier's landed unit price, what they quoted, flags and the source of each price.",
+    description: "One line item: each supplier's landed unit price, what they quoted, flags and the source of each price.",
     inputSchema: { rfx: RFX, lineNo: z.number().int(), user_request: USER_REQUEST },
     annotations: ro,
   }, async (args) => run("get_line", args, async () => {
@@ -573,7 +578,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("list_needs_attention", {
     title: "What needs review",
-    description: "Everything excluded from totals or worth checking: prices where two reads disagree, unreadable prices, low-confidence reads, prices taken from previous POs, items with no matching RFQ line, unclear line items and unread documents.",
+    description: "Everything excluded from totals or worth checking: prices where two reads disagree, unreadable prices, low-confidence reads, prices taken from previous POs, items with no matching line item, unclear line items and unread documents.",
     inputSchema: { rfx: RFX, user_request: USER_REQUEST },
     annotations: ro,
   }, async (args) => run("list_needs_attention", args, async () => {
@@ -703,9 +708,9 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("add_unit_rule", {
     title: "Add a unit conversion",
-    description: "Tell Bidline how a supplier's unit of measure relates to the RFQ unit. Factor 1 means the same unit under another name (e.g. 'nos' = 'each'). Any other factor converts, e.g. one RFQ 'kit' = 2 x 'per DIMM'.",
+    description: "Tell Bidline how a supplier's unit of measure relates to the requested unit. Factor 1 means the same unit under another name (e.g. 'nos' = 'each'). Any other factor converts, e.g. one event 'kit' = 2 x 'per DIMM'.",
     inputSchema: {
-      rfx: RFX, fromUom: z.string().describe("The supplier's unit, e.g. 'per DIMM'."), toUom: z.string().describe("The unit on the RFQ line, e.g. 'kit'."),
+      rfx: RFX, fromUom: z.string().describe("The supplier's unit, e.g. 'per DIMM'."), toUom: z.string().describe("The unit on the line item, e.g. 'kit'."),
       factor: z.number().positive().describe("How many of fromUom make one toUom."), basis: z.string().describe("Reason, e.g. 'one kit = two 16GB DIMMs per the line spec'."),
       user_request: USER_REQUEST,
     },
@@ -721,7 +726,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("set_prior_po_rates", {
     title: "Record previous PO rates",
-    description: "Record rates from the buyer's earlier purchase order, so a supplier's 'same as last time' or '6% over last year' can be priced. Rates are per RFQ SKU, in INR per RFQ unit.",
+    description: "Record rates from the buyer's earlier purchase order, so a supplier's 'same as last time' or '6% over last year' can be priced. Rates are per event SKU, in INR per requested unit.",
     inputSchema: {
       rfx: RFX, poNumber: z.string(), poDate: z.string(), vendor: z.string(),
       rates: z.record(z.string(), z.number()).describe("SKU to INR rate, e.g. {'MON-24': 10100}"),
@@ -735,7 +740,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("record_assumption", {
     title: "Record an assumption",
-    description: "Record an assumption on the RFQ (e.g. how GST or freight is treated), with its source. Shown to the buyer and in the award note.",
+    description: "Record an assumption on the event (e.g. how GST or freight is treated), with its source. Shown to the buyer and in the award note.",
     inputSchema: { rfx: RFX, key: z.string(), value: z.string(), source: z.string(), note: z.string().optional(), user_request: USER_REQUEST },
     annotations: rw,
   }, async (args) => run("record_assumption", args, async (ctx) => {
@@ -745,7 +750,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("resolve_unmatched_item", {
     title: "Match or exclude an unmatched item",
-    description: "Decide what to do with an item a supplier quoted that matches no RFQ line (ids from list_needs_attention): match it to a line, or exclude it, with a reason.",
+    description: "Decide what to do with an item a supplier quoted that matches no line item (ids from list_needs_attention): match it to a line, or exclude it, with a reason.",
     inputSchema: { rfx: RFX, itemId: z.string(), lineNo: z.number().int().optional(), dismiss: z.boolean().optional(), reason: z.string(), user_request: USER_REQUEST },
     annotations: rw,
   }, async (args) => run("resolve_unmatched_item", args, async (ctx) => {
@@ -777,19 +782,81 @@ export function buildServer(user: User, appUrl: string): McpServer {
   }, { query: "Asked for open follow-up items.", rfx: args.rfx ?? "" }));
 
   server.registerTool("record_chase", {
-    title: "Record a follow-up",
-    description: "Record a follow-up to one supplier for missing items, with a due date. Bidline drafts the message from the open items unless you provide your own. Bidline records it but does not send it: give the user the message to send.",
+    title: "Record a follow-up without emailing it",
+    description: "Record a follow-up to one supplier for missing items, with a due date, without sending it. Bidline drafts the message from the open items unless you give your own wording. To email it from the buyer's mailbox, use email_supplier instead.",
     inputSchema: {
-      rfx: RFX, supplier: z.string(), dueDate: z.string().optional().describe("YYYY-MM-DD, default 3 days."),
-      message: z.string().optional().describe("Your own wording. Leave out to use Bidline's draft."),
+      rfx: RFX, supplier: z.string(), dueDate: z.string().optional().describe("YYYY-MM-DD. Default: the buyer's follow-up period."),
+      subject: z.string().optional(), message: z.string().optional().describe("Your own wording. Leave out to use Bidline's draft."),
       onlyLines: z.array(z.number().int()).optional(), onlyQuestions: z.array(z.string()).optional(),
       channel: z.string().optional(),
       user_request: USER_REQUEST,
     },
     annotations: rw,
   }, async (args) => run("record_chase", args, async (ctx) => {
-    const r = await recordChaseAction(ctx, args);
-    return `Recorded a follow-up to ${r.supplier.code} ${r.supplier.name} for ${r.items.length} item${r.items.length === 1 ? "" : "s"}, due ${r.due}. Bidline does not send emails. Here is the message to send:\n\n${r.message}`;
+    const r = await recordChaseAction(ctx, { ...args, send: false });
+    return `Recorded a follow-up to ${r.supplier.code} ${r.supplier.name} for ${r.items.length} item${r.items.length === 1 ? "" : "s"}, reply due ${r.due}. Not emailed.\n\nSubject: ${r.subject}\n\n${r.message}`;
+  }));
+
+  server.registerTool("email_supplier", {
+    title: "Draft or send a follow-up email to a supplier",
+    description: "Write the follow-up email for what a supplier still owes. With send false (the default) Bidline returns the draft only: show it to the user. With send true it is emailed from the buyer's connected mailbox (Settings > Email) and recorded. Only send after the user has seen the draft and asked you to send it. On demo events the email goes to the buyer's own address, because demo suppliers are fictional.",
+    inputSchema: {
+      rfx: RFX, supplier: z.string(),
+      send: z.boolean().optional().describe("Default false: draft only."),
+      to: z.string().optional().describe("Recipient. Default: the supplier's email on file."),
+      subject: z.string().optional().describe("Your subject line. Leave out to use Bidline's."),
+      body: z.string().optional().describe("Your wording. Leave out to use Bidline's draft, which lists exactly what is missing."),
+      dueDate: z.string().optional().describe("Reply-by date, YYYY-MM-DD."),
+      onlyLines: z.array(z.number().int()).optional(), onlyQuestions: z.array(z.string()).optional(),
+      user_request: USER_REQUEST,
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
+  }, async (args) => run("email_supplier", args, async (ctx) => {
+    if (!args.send) {
+      const d = await draftFollowUp(ctx, args);
+      if (!d.drafted.items.length && !args.body) return `${d.supplier.name} has nothing outstanding on ${d.rfx.code}.`;
+      const account = await getEmailAccount(user.id);
+      return [
+        `DRAFT (not sent) to ${d.supplier.code} ${d.supplier.name}${d.demo ? " (demo event: would be sent to the buyer's own address)" : d.to ? ` at ${d.to}` : " (no email on file: add one, or pass 'to')"}`,
+        `From: ${account ? `${account.from_name} <${account.from_email}>` : "no mailbox connected yet: the buyer can connect one in Settings > Email"}`,
+        `Subject: ${args.subject ?? d.drafted.subject}`,
+        "",
+        args.body ?? d.drafted.body,
+        "",
+        "Ask the user to confirm before calling email_supplier again with send: true.",
+      ].join("\n");
+    }
+    const r = await recordChaseAction(ctx, { ...args, message: args.body, send: true });
+    return `Sent to ${r.to} from the buyer's mailbox and recorded on ${r.rfx.code}. Reply due ${r.due}.${r.note}\n\nSubject: ${r.subject}`;
+  }));
+
+  server.registerTool("update_follow_up", {
+    title: "Mark a follow-up answered or closed",
+    description: "Mark a recorded follow-up as answered (or not), or close it with a reason. Follow-up ids come from get_supplier or get_activity.",
+    inputSchema: {
+      rfx: RFX, followUpId: z.string(), answered: z.boolean().optional(), closedReason: z.string().optional(),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("update_follow_up", args, async (ctx) => {
+    await updateChaseAction(ctx, args.rfx ?? "", args.followUpId, { answered: args.answered, closedReason: args.closedReason ?? null });
+    return "Follow-up updated.";
+  }));
+
+  server.registerTool("update_document", {
+    title: "Change a document's supplier, type or status",
+    description: "Say which supplier a document came from, what kind it is (quotation, questionnaire, certificate, rfx_pack, other), or mark it read or unread.",
+    inputSchema: {
+      rfx: RFX, document: z.string().describe("Document id or file name."),
+      supplier: z.string().optional(), kind: z.enum(["quotation", "questionnaire", "certificate", "rfx_pack", "other"]).optional(),
+      status: z.enum(["unread", "read"]).optional(),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("update_document", args, async (ctx) => {
+    const rfx = await resolveRfx(user.id, args.rfx);
+    const d = await updateDocumentAction(ctx, rfx.id, args.document, { supplierRef: args.supplier ?? null, kind: args.kind ?? null, status: args.status ?? null });
+    return `Updated ${d?.filename ?? args.document}.`;
   }));
 
   // -------------------------------------------------------------------------
@@ -821,7 +888,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("get_award_status", {
     title: "Award and approval status",
-    description: "Awards drafted on an RFQ and whether the approver has approved, rejected or requested changes.",
+    description: "Awards drafted on a sourcing event and whether the approver has approved, rejected or requested changes.",
     inputSchema: { rfx: RFX, user_request: USER_REQUEST },
     annotations: ro,
   }, async (args) => run("get_award_status", args, async () => {
@@ -839,7 +906,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("get_export_link", {
     title: "Download link for an export",
-    description: "Get a download link, valid for 24 hours and needing no login, for this RFQ's comparison as Excel (with a supplier sheet and an audit-trail sheet) or CSV, or the activity log as Markdown. Give the link to the user.",
+    description: "Get a download link, valid for 24 hours and needing no login, for this event's comparison as Excel (with a supplier sheet and an audit-trail sheet) or CSV, or the activity log as Markdown. Give the link to the user.",
     inputSchema: {
       rfx: RFX,
       format: z.enum(["xlsx", "csv", "transcript"]).describe("xlsx = Excel workbook, csv = comparison table, transcript = activity log (.md)"),
@@ -855,7 +922,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("get_activity", {
     title: "Activity log",
-    description: "Recent activity on an RFQ, newest first: requests made in Claude, actions taken through Bidline's tools, and every edit the buyer made in the app (so you see changes made outside this chat). format 'markdown' returns the full activity log.",
+    description: "Recent activity on a sourcing event, newest first: requests made in Claude, actions taken through Bidline's tools, and every edit the buyer made in the app (so you see changes made outside this chat). format 'markdown' returns the full activity log.",
     inputSchema: {
       rfx: RFX, limit: z.number().int().positive().max(500).optional(),
       onlyAppEdits: z.boolean().optional().describe("Only changes made in the app."),

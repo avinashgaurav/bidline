@@ -98,7 +98,7 @@ export function transcriptMarkdown(opts: {
     "",
     `Generated ${fmtTime(new Date().toISOString())}. ${rows.length} entries, oldest first.`,
     "",
-    "This log records every change to this RFQ: requests made in Claude, actions Claude took",
+    "This log records every change to this event: requests made in Claude, actions Claude took",
     "in Bidline, edits made in the app, and approval decisions.",
     "",
   ];

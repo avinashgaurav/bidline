@@ -1,28 +1,42 @@
-import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { logoutAction } from "@/app/actions";
 import { Logo } from "@/components/brand";
+import { SidebarNav } from "@/components/sidebar-nav";
+import { LogOut } from "lucide-react";
+import { Suspense } from "react";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
+  const connected = Boolean(user.last_mcp_at);
+  const initials = user.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
   return (
-    <div className="min-h-screen">
-      <header className="bg-night text-on-dark">
-        <div className="mx-auto flex h-16 max-w-[1440px] items-center gap-8 px-6">
-          <Logo dark />
-          <nav className="flex items-center gap-1 text-sm">
-            <Link href="/" className="rounded-full px-4 py-2 hover:bg-white/10">RFQs</Link>
-            <Link href="/connect" className="rounded-full px-4 py-2 hover:bg-white/10">Connect Claude</Link>
-          </nav>
-          <div className="ml-auto flex items-center gap-4 text-sm">
-            <span className="hidden text-fog sm:inline">{user.email}</span>
-            <form action={logoutAction}>
-              <button className="rounded-full bg-white/10 px-4 py-2 hover:bg-white/20">Sign out</button>
-            </form>
+    <div className="min-h-screen lg:grid lg:grid-cols-[248px_1fr]">
+      <aside className="sticky top-0 hidden h-screen flex-col bg-night px-5 py-6 text-on-dark lg:flex">
+        <div className="px-1"><Logo dark /></div>
+        <div className="mt-8 overflow-y-auto"><Suspense><SidebarNav connected={connected} /></Suspense></div>
+        <div className="mt-auto grid gap-3 border-t border-white/10 pt-4">
+          <div className="flex items-center gap-3 px-1">
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-white/10 text-xs">{initials}</span>
+            <div className="min-w-0">
+              <p className="truncate text-sm">{user.name}</p>
+              <p className="truncate text-xs text-fog">{user.email}</p>
+            </div>
           </div>
+          <form action={logoutAction}>
+            <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-fog hover:bg-white/5 hover:text-white">
+              <LogOut className="size-4" /> Sign out
+            </button>
+          </form>
         </div>
+      </aside>
+      <header className="flex items-center gap-3 bg-night px-4 py-3 text-on-dark lg:hidden">
+        <Logo dark />
+        <div className="ml-auto min-w-0"><Suspense><SidebarNav connected={connected} compact /></Suspense></div>
+        <form action={logoutAction}><button aria-label="Sign out" className="rounded-lg p-2 text-fog hover:text-white"><LogOut className="size-4" /></button></form>
       </header>
-      <main className="mx-auto max-w-[1440px] px-6 py-8">{children}</main>
+      <main className="min-w-0 px-4 py-6 sm:px-8 sm:py-8">
+        <div className="mx-auto max-w-[1320px]">{children}</div>
+      </main>
     </div>
   );
 }

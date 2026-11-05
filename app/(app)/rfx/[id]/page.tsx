@@ -16,20 +16,13 @@ import { ChaseTab } from "@/components/rfx/chase";
 import { AwardTab } from "@/components/rfx/award";
 import { AssumptionsTab } from "@/components/rfx/assumptions";
 import { ActivityList } from "@/components/activity-list";
+import { EVENT_STEPS } from "@/lib/event-steps";
+import { AskBox } from "@/components/rfx/ask";
+import { SUGGESTIONS } from "@/lib/insights";
 
-const TABS = [
-  ["comparison", "Comparison"],
-  ["documents", "Documents"],
-  ["lines", "Line items"],
-  ["suppliers", "Suppliers"],
-  ["questionnaire", "Questionnaire"],
-  ["chase", "Follow-ups"],
-  ["award", "Award"],
-  ["assumptions", "Rates & units"],
-  ["activity", "Activity"],
-] as const;
+const TABS = EVENT_STEPS.map((s) => [s.tab, s.label] as const);
 
-export const metadata = { title: "RFQ · Bidline" };
+export const metadata = { title: "Sourcing event · Bidline" };
 
 export default async function RfxPage({ params, searchParams }: {
   params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; who?: string }>;
@@ -54,8 +47,9 @@ export default async function RfxPage({ params, searchParams }: {
     <div className="grid gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <Link href="/" className="text-sm text-ink-secondary hover:text-primary">RFQs</Link>
+          <Link href="/" className="text-sm text-ink-secondary hover:text-primary">Sourcing events</Link>
           <div className="mt-1 flex flex-wrap items-center gap-3">
+            <span className="rounded-md bg-night px-1.5 py-0.5 text-[12px] font-medium tracking-wide text-on-dark">{rfx.event_type}</span>
             <span className="num text-sm text-ink-secondary">{rfx.code}</span>
             <span className="rounded-full bg-secondary px-2.5 py-0.5 text-xs capitalize text-primary">{rfx.status}</span>
             {rfx.created_via === "claude" ? <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs text-ink-secondary">Created in Claude</span> : null}
@@ -69,14 +63,14 @@ export default async function RfxPage({ params, searchParams }: {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <LiveRefresh url={`/api/rfx/${rfx.id}/version`} initial={version} />
-          <a href={`/api/rfx/${rfx.id}/export/xlsx`} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] hover:bg-lavender"><Download className="size-3.5" />Excel</a>
-          <a href={`/api/rfx/${rfx.id}/export/csv`} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] hover:bg-lavender"><Download className="size-3.5" />CSV</a>
-          <a href={`/api/rfx/${rfx.id}/export/transcript`} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[13px] hover:bg-lavender"><Download className="size-3.5" />Activity log .md</a>
+          <a href={`/api/rfx/${rfx.id}/export/xlsx`} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[14px] hover:bg-lavender"><Download className="size-3.5" />Excel</a>
+          <a href={`/api/rfx/${rfx.id}/export/csv`} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[14px] hover:bg-lavender"><Download className="size-3.5" />CSV</a>
+          <a href={`/api/rfx/${rfx.id}/export/transcript`} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-secondary px-3 text-[14px] hover:bg-lavender"><Download className="size-3.5" />Activity log .md</a>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Kpi label="Cheapest per line, all suppliers" value={inrShort(c.naive.totalInr)} sub={`${c.naive.linesAwarded}/${cmp.lines.length} lines`} />
+        <Kpi label="Cheapest per line, all suppliers" value={cmp.hasAnyReading ? inrShort(c.naive.totalInr) : "Not yet"} sub={cmp.hasAnyReading ? `${c.naive.linesAwarded}/${cmp.lines.length} lines` : "No quotes read yet"} />
         <Kpi
           label="Qualified suppliers only"
           value={!cmp.questions.length ? "No questionnaire" : showQualified ? inrShort(c.compliant.totalInr) : "Pending"}
@@ -95,7 +89,9 @@ export default async function RfxPage({ params, searchParams }: {
         <p className="rounded-xl bg-[var(--cell-review-bg)] p-4 text-sm" style={{ boxShadow: "inset 3px 0 0 var(--cell-review)" }}>{c.likeForLike.warning}</p>
       ) : null}
 
-      <nav className="flex gap-1 overflow-x-auto border-b border-border" aria-label="RFQ sections">
+      {cmp.hasAnyReading ? <AskBox rfxId={rfx.id} code={rfx.code} suggestions={SUGGESTIONS} /> : null}
+
+      <nav className="flex gap-1 overflow-x-auto border-b border-border lg:hidden" aria-label="Event sections">
         {TABS.map(([k, label]) => (
           <Link
             key={k}
@@ -109,6 +105,8 @@ export default async function RfxPage({ params, searchParams }: {
           </Link>
         ))}
       </nav>
+
+      <h2 className="hidden text-[24px] lg:block">{TABS.find(([k]) => k === tab)?.[1]}</h2>
 
       {tab === "comparison" ? <ComparisonGrid view={gridView(cmp)} /> : null}
       {tab === "documents" ? <DocumentsTab cmp={cmp} /> : null}
@@ -127,7 +125,7 @@ function Kpi({ label, value, sub, warn = false }: { label: string; value: string
   return (
     <div className={`rounded-xl p-4 ${warn ? "bg-[var(--cell-review-bg)]" : "bg-card ring-1 ring-border"}`}>
       <p className="text-xs text-ink-secondary">{label}</p>
-      <p className="num mt-1 text-[22px] leading-tight">{value}</p>
+      <p className="num mt-1 text-[24px] leading-tight">{value}</p>
       {sub ? <p className="mt-0.5 text-xs text-ink-secondary">{sub}</p> : null}
     </div>
   );

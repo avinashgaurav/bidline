@@ -12,6 +12,8 @@ export interface RfxRow {
   code: string;
   title: string;
   status: string;
+  /** RFQ, RFP, RFI or TENDER: shown beside the event name. */
+  event_type: string;
   buyer: Record<string, unknown>;
   approver: Record<string, unknown>;
   terms_asked: Record<string, unknown>;
@@ -212,8 +214,11 @@ export async function nextRfxCode(userId: string): Promise<string> {
   return `RFX-${year}-${Date.now() % 100000}`;
 }
 
+export const EVENT_TYPES = ["RFQ", "RFP", "RFI", "TENDER"] as const;
+
 export async function createRfx(userId: string, input: {
   title: string;
+  eventType?: string | null;
   code?: string;
   dueDate?: string | null;
   buyer?: Record<string, unknown>;
@@ -227,11 +232,13 @@ export async function createRfx(userId: string, input: {
   if (!input.title?.trim()) throw new BadInput("An enquiry needs a title.");
   const id = newId("rfx");
   const code = input.code?.trim() || (await nextRfxCode(userId));
+  const type = (input.eventType ?? "RFQ").toUpperCase();
+  if (!(EVENT_TYPES as readonly string[]).includes(type)) throw new BadInput(`Event type must be one of ${EVENT_TYPES.join(", ")}.`);
   await q(
-    `insert into rfx (id, user_id, code, title, buyer, approver, terms_asked, notes, due_at, created_via)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    `insert into rfx (id, user_id, code, title, event_type, buyer, approver, terms_asked, notes, due_at, created_via)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [
-      id, userId, code, input.title.trim(), json(input.buyer ?? {}), json(input.approver ?? {}),
+      id, userId, code, input.title.trim(), type, json(input.buyer ?? {}), json(input.approver ?? {}),
       json(input.termsAsked ?? {}), input.notes ?? null, input.dueDate || null, input.createdVia,
     ],
   );

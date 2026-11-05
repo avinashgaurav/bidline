@@ -21,7 +21,7 @@ export function AssumptionsTab({ cmp }: { cmp: Comparison }) {
       <section className="grid gap-4 rounded-xl bg-card p-6 ring-1 ring-border">
         <div>
           <p className="eyebrow">Unit of measure conversions</p>
-          <p className="mt-1 text-sm text-ink-secondary">How a supplier&apos;s unit of measure converts to the RFQ unit. A factor of 1 means both names refer to the same unit.</p>
+          <p className="mt-1 text-sm text-ink-secondary">How a supplier&apos;s unit of measure converts to the requested unit. A factor of 1 means both names refer to the same unit.</p>
         </div>
         <ul className="grid gap-1 text-sm">
           {cmp.rules.uomConversions.map((c, i) => <li key={i}>One <b className="font-medium">{c.to_uom}</b> = {c.factor} × &ldquo;{c.from_uom}&rdquo; <span className="text-xs text-ink-secondary">({c.basis})</span></li>)}
@@ -40,7 +40,7 @@ export function AssumptionsTab({ cmp }: { cmp: Comparison }) {
       </section>
       <section className="grid gap-3 rounded-xl bg-card p-6 ring-1 ring-border">
         <p className="eyebrow">Unmatched items ({open.length})</p>
-        <p className="text-sm text-ink-secondary">Items a supplier quoted that are not in the RFQ. Bidline does not match them to a line unless you choose one.</p>
+        <p className="text-sm text-ink-secondary">Items a supplier quoted that are not in the request. Bidline does not match them to a line unless you choose one.</p>
         {cmp.unmapped.map((u) => {
           const s = cmp.suppliers.find((x) => x.id === u.supplier_id);
           return (

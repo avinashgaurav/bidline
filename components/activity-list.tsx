@@ -17,7 +17,7 @@ export function ActivityList({ events, compact = false }: { events: EventRow[]; 
           <li key={e.id} className="grid gap-1 border-b border-border pb-3 last:border-0">
             <div className="flex flex-wrap items-center gap-2 text-xs text-ink-secondary">
               <span className={`rounded-full px-2 py-0.5 ${a.cls}`}>{a.label}</span>
-              {e.tool ? <code className="text-[11px]">{e.tool}</code> : null}
+              {e.tool ? <code className="text-[12px]">{e.tool}</code> : null}
               <span className="num">{new Date(e.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span>
             </div>
             {e.user_request && !compact ? <p className="text-sm text-ink-secondary">Asked: &ldquo;{e.user_request}&rdquo;</p> : null}

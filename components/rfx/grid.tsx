@@ -31,7 +31,7 @@ export function ComparisonGrid({ view }: { view: GridView }) {
   }
 
   if (!view.lines.length) {
-    return <p className="rounded-xl bg-card p-8 text-sm text-ink-secondary ring-1 ring-border">This RFQ has no line items yet. Add them on the Line items tab, or ask Claude to add them.</p>;
+    return <p className="rounded-xl bg-card p-8 text-sm text-ink-secondary ring-1 ring-border">This event has no line items yet. Add them on the Line items tab, or ask Claude to add them.</p>;
   }
 
   return (
@@ -42,7 +42,7 @@ export function ComparisonGrid({ view }: { view: GridView }) {
         <Legend cls="cell-review" label="Needs review, excluded from totals" />
         <Legend cls="cell-empty" label="No price" />
         <span className="inline-flex items-center gap-1"><Pencil className="size-3" /> Edited</span>
-        <span>Landed unit prices in ₹ per RFQ unit, ex-GST.</span>
+        <span>Landed unit prices in ₹ per requested unit, ex-GST.</span>
       </div>
       <div className="max-h-[70vh] overflow-auto rounded-xl bg-card ring-1 ring-border">
         <table className="grid-table w-full">
@@ -53,10 +53,10 @@ export function ComparisonGrid({ view }: { view: GridView }) {
               {view.suppliers.map((s) => (
                 <th key={s.code} className="min-w-[132px] text-right">
                   <div className="grid justify-items-end gap-1">
-                    <span className="text-[11px] text-ink-secondary">{s.code}</span>
+                    <span className="text-[12px] text-ink-secondary">{s.code}</span>
                     <span className="max-w-[150px] truncate" title={s.name}>{s.short}</span>
                     {s.qualification !== "none" ? (
-                      <span title={s.failed.length ? `Failed mandatory questions: ${s.failed.join(", ")}` : undefined} className={`rounded-full px-2 py-0.5 text-[10px] font-normal ${QUAL[s.qualification].cls}`}>
+                      <span title={s.failed.length ? `Failed mandatory questions: ${s.failed.join(", ")}` : undefined} className={`rounded-full px-2 py-0.5 text-[12px] font-normal ${QUAL[s.qualification].cls}`}>
                         {QUAL[s.qualification].label}
                       </span>
                     ) : null}
@@ -75,14 +75,14 @@ export function ComparisonGrid({ view }: { view: GridView }) {
               <td className="col-sticky">
                 <div className="grid">
                   <span>All lines to one supplier</span>
-                  <span className="text-[11px] font-normal text-ink-secondary">Comparable lines only, before any order discount</span>
+                  <span className="text-[12px] font-normal text-ink-secondary">Comparable lines only, before any order discount</span>
                 </div>
               </td>
               <td />
               {view.suppliers.map((s) => (
                 <td key={s.code} className="num text-right">
                   ₹{num(s.totalInr)}
-                  <span className="block text-[11px] font-normal text-ink-secondary">{s.linesPriced}/{view.lines.length} lines</span>
+                  <span className="block text-[12px] font-normal text-ink-secondary">{s.linesPriced}/{view.lines.length} lines</span>
                 </td>
               ))}
             </tr>
@@ -119,7 +119,7 @@ function GroupRows({ group, view, onOpen }: {
               <span className="truncate" title={l.desc}>{l.desc}</span>
             </div>
           </td>
-          <td className="num text-right text-ink-secondary">{l.qty} <span className="text-[11px]">{l.uom}</span></td>
+          <td className="num text-right text-ink-secondary">{l.qty} <span className="text-[12px]">{l.uom}</span></td>
           {view.suppliers.map((s) => {
             const c = view.cells[`${s.code}:${l.no}`];
             if (!c) return <td key={s.code} />;
@@ -142,7 +142,7 @@ function GroupRows({ group, view, onOpen }: {
                   {c.unitInr !== null ? (
                     <span>{num(c.unitInr)}{lowConf ? <sup className="text-warning">?</sup> : null}</span>
                   ) : (
-                    <span className="text-[11px] text-ink-secondary">{glyph?.short ?? action?.label}</span>
+                    <span className="text-[12px] text-ink-secondary">{glyph?.short ?? action?.label}</span>
                   )}
                 </button>
               </td>

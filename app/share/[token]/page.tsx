@@ -40,14 +40,14 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
         <aside className="grid h-fit gap-4">
           <div className="rounded-xl bg-lavender p-6">
             <p className="text-xs text-ink-secondary">{a.snapshot.label}</p>
-            <p className="num mt-1 text-[30px] leading-none">₹{Math.round(a.snapshot.totalInr).toLocaleString("en-IN")}</p>
+            <p className="num mt-1 text-[28px] leading-none">₹{Math.round(a.snapshot.totalInr).toLocaleString("en-IN")}</p>
             <p className="mt-2 text-sm text-ink-secondary">{a.snapshot.linesAwarded} of {a.snapshot.linesInRfx} line items, ex-GST. Bidline calculated every figure from the suppliers&apos; documents.</p>
           </div>
           <div className="rounded-xl bg-card p-6 ring-1 ring-border">
             {decided ? (
               <div className="grid gap-2 text-sm">
                 <p className="eyebrow">Decision</p>
-                <p className="text-[20px] capitalize">{a.status.replace(/_/g, " ")}</p>
+                <p className="text-[18px] capitalize">{a.status.replace(/_/g, " ")}</p>
                 <p className="text-ink-secondary">by {a.decided_by} on {a.decided_at ? new Date(a.decided_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : ""}</p>
                 {a.decision_note ? <p>&ldquo;{a.decision_note}&rdquo;</p> : null}
               </div>

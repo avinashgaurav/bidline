@@ -138,7 +138,7 @@ export async function checkLogin(email: string, password: string): Promise<User 
 
 // ---------------------------------------------------------------------------
 // Signed download links: let Claude hand the buyer an export without a login.
-// The link names one RFQ and one file type and expires.
+// The link names one event and one file type and expires.
 // ---------------------------------------------------------------------------
 
 export function signExport(userId: string, rfxId: string, kind: string, hours = 24): string {

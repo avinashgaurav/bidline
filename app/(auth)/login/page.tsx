@@ -9,7 +9,7 @@ export default async function LoginPage() {
   return (
     <>
       <h2 className="text-[28px]">Sign in</h2>
-      <p className="mt-1 mb-6 text-sm text-ink-secondary">Sign in to see your RFQs.</p>
+      <p className="mt-1 mb-6 text-sm text-ink-secondary">Sign in to see your sourcing events.</p>
       <AuthForm mode="login" />
     </>
   );

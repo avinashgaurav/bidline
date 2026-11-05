@@ -57,8 +57,8 @@ export function AddLine({ rfxId, group }: { rfxId: string; group: string }) {
   );
 }
 
-export function HeaderForm({ rfxId, title, due, status, approverName, approverEmail }: {
-  rfxId: string; title: string; due: string; status: string; approverName: string; approverEmail: string;
+export function HeaderForm({ rfxId, title, eventType, due, status, approverName, approverEmail }: {
+  rfxId: string; title: string; eventType: string; due: string; status: string; approverName: string; approverEmail: string;
 }) {
   const [state, action] = useActionState<FormState, FormData>(updateRfxUI.bind(null, rfxId), {});
   return (
@@ -68,6 +68,14 @@ export function HeaderForm({ rfxId, title, due, status, approverName, approverEm
       <Field label="Status">
         <select name="status" defaultValue={status} className={fieldClass}>
           {["draft", "issued", "evaluating", "awarded", "closed"].map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </Field>
+      <Field label="Type">
+        <select name="eventType" defaultValue={eventType} className={fieldClass}>
+          <option value="RFQ">RFQ: request for quotation</option>
+          <option value="RFP">RFP: request for proposal</option>
+          <option value="RFI">RFI: request for information</option>
+          <option value="TENDER">Tender</option>
         </select>
       </Field>
       <Field label="Approver name"><input name="approverName" defaultValue={approverName} className={fieldClass} /></Field>
@@ -86,7 +94,7 @@ export function IssueForm({ rfxId, gateCount, issued }: { rfxId: string; gateCou
           <input name="overrideReason" className={`${fieldClass} min-w-[320px]`} placeholder="Suppliers confirmed pack sizes on the pre-bid call" />
         </Field>
       ) : null}
-      <SubmitButton>{issued ? "Reissue RFQ" : "Issue RFQ"}</SubmitButton>
+      <SubmitButton>{issued ? "Reissue to suppliers" : "Issue to suppliers"}</SubmitButton>
       <FormMessage state={state} />
     </form>
   );

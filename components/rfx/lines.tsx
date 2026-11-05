@@ -10,15 +10,15 @@ export function LinesTab({ cmp, gate }: { cmp: Comparison; gate: GateIssue[] }) 
   return (
     <div className="grid gap-6">
       <section className="rounded-xl bg-card p-6 ring-1 ring-border">
-        <p className="eyebrow mb-3">RFQ details</p>
-        <HeaderForm rfxId={r.id} title={r.title} due={r.due_at ? r.due_at.slice(0, 10) : ""} status={r.status} approverName={approver.name ?? ""} approverEmail={approver.email ?? ""} />
+        <p className="eyebrow mb-3">Event details</p>
+        <HeaderForm rfxId={r.id} title={r.title} eventType={r.event_type} due={r.due_at ? r.due_at.slice(0, 10) : ""} status={r.status} approverName={approver.name ?? ""} approverEmail={approver.email ?? ""} />
       </section>
       <section className="rounded-xl bg-card ring-1 ring-border">
         <div className="flex flex-wrap items-center justify-between gap-3 p-5">
           <div>
             <p className="eyebrow">Line items</p>
             <p className="mt-1 text-sm text-ink-secondary">
-              {gate.length ? `${gate.length} line item${gate.length === 1 ? " is" : "s are"} not specific enough for like-for-like quotes. Fix before you issue the RFQ.` : "All line items are fully specified."}
+              {gate.length ? `${gate.length} line item${gate.length === 1 ? " is" : "s are"} not specific enough for like-for-like quotes. Fix before you issue the event.` : "All line items are fully specified."}
               {" "}Changes here update the comparison and are recorded in the activity log.
             </p>
           </div>

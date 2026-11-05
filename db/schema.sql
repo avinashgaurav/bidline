@@ -263,3 +263,41 @@ create table if not exists events (
 );
 create index if not exists events_rfx_idx on events(rfx_id, id);
 create index if not exists events_user_idx on events(user_id, id);
+
+-- Each sourcing event has a type shown beside its name: RFQ, RFP, RFI or tender.
+alter table rfx add column if not exists event_type text not null default 'RFQ';
+
+-- Buyer profile and defaults (Settings).
+alter table users add column if not exists company text;
+alter table users add column if not exists job_title text;
+alter table users add column if not exists followup_days integer not null default 3;
+alter table users add column if not exists default_approver_name text;
+alter table users add column if not exists default_approver_email text;
+
+-- The buyer's own mailbox for supplier follow-ups (Settings > Email). The
+-- password is an app password, stored encrypted with a key derived from
+-- AUTH_SECRET; it is never shown again after saving.
+create table if not exists email_accounts (
+  user_id       text primary key references users(id) on delete cascade,
+  provider      text not null default 'custom',
+  from_name     text not null,
+  from_email    text not null,
+  reply_to      text,
+  smtp_host     text not null,
+  smtp_port     integer not null,
+  smtp_secure   boolean not null default true,
+  smtp_user     text not null,
+  smtp_pass_enc text not null,
+  signature     text,
+  bcc_self      boolean not null default true,
+  verified_at   timestamptz,
+  last_error    text,
+  updated_at    timestamptz not null default now()
+);
+
+-- How a follow-up went out.
+alter table chases add column if not exists subject text;
+alter table chases add column if not exists to_email text;
+alter table chases add column if not exists sent_via text not null default 'recorded';
+alter table chases add column if not exists message_id text;
+alter table chases add column if not exists send_error text;

@@ -10,7 +10,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
 
 export function QuestionnaireTab({ cmp }: { cmp: Comparison }) {
   if (!cmp.questions.length) {
-    return <p className="rounded-xl bg-card p-8 text-sm text-ink-secondary ring-1 ring-border">This RFQ has no supplier questionnaire. Ask Claude to add questions, for example &ldquo;In Bidline, add ISO 27001:2022 certification as a mandatory question&rdquo;.</p>;
+    return <p className="rounded-xl bg-card p-8 text-sm text-ink-secondary ring-1 ring-border">This event has no supplier questionnaire. Ask Claude to add questions, for example &ldquo;In Bidline, add ISO 27001:2022 certification as a mandatory question&rdquo;.</p>;
   }
   return (
     <div className="grid gap-4">
@@ -25,7 +25,7 @@ export function QuestionnaireTab({ cmp }: { cmp: Comparison }) {
                 return (
                   <th key={s.code} className="min-w-[150px] px-3 py-3 font-medium">
                     {s.code} {s.name.split(" ")[0]}
-                    <span className={`mt-1 block w-fit rounded-full px-2 py-0.5 text-[11px] font-normal ${!v.assessed ? "bg-muted text-ink-secondary" : v.qualified ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
+                    <span className={`mt-1 block w-fit rounded-full px-2 py-0.5 text-[12px] font-normal ${!v.assessed ? "bg-muted text-ink-secondary" : v.qualified ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
                       {!v.assessed ? "Not assessed" : v.qualified ? "Qualified" : "Not qualified"}
                     </span>
                   </th>

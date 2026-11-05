@@ -16,7 +16,7 @@ export function Logo({ dark = false }: { dark?: boolean }) {
   return (
     <Link href="/" className={`flex items-center gap-2 ${dark ? "text-on-dark" : "text-foreground"}`}>
       <Mark />
-      <span className="text-[17px] tracking-wide" style={{ fontWeight: 480 }}>Bidline</span>
+      <span className="text-[18px] tracking-wide" style={{ fontWeight: 480 }}>Bidline</span>
     </Link>
   );
 }
