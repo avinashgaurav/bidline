@@ -1,42 +1,58 @@
-import { requireUser } from "@/lib/auth";
-import { logoutAction } from "@/app/actions";
-import { Logo } from "@/components/brand";
-import { SidebarNav } from "@/components/sidebar-nav";
-import { LogOut } from "lucide-react";
 import { Suspense } from "react";
+import { requireUser } from "@/lib/auth";
+import { logoutAction, switchWorkspaceAction } from "@/app/actions";
+import { listRfxs } from "@/lib/rfx";
+import { myWorkspaces } from "@/lib/team";
+import { versionOf } from "@/lib/events";
+import { can } from "@/lib/roles";
+import { AppSidebar } from "@/components/app-sidebar";
+import { CommandMenu, SearchButton } from "@/components/command-menu";
+import { NotificationBell } from "@/components/notifications";
+import { LiveRefresh } from "@/components/live-refresh";
+import { NewMenu } from "@/components/new-menu";
+import { FirstRun } from "@/components/first-run";
+import { appUrlFromHeaders } from "@/lib/app-url";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
-  const connected = Boolean(user.last_mcp_at);
-  const initials = user.name.split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+  const [events, workspaces, version, base] = await Promise.all([listRfxs(user.id), myWorkspaces(user.id), versionOf({ userId: user.id }), appUrlFromHeaders()]);
+  const sidebarEvents = events.map((e) => ({
+    id: e.id, code: e.code, title: e.title, status: e.status, restricted: e.restricted, archived_at: e.archived_at,
+    line_count: e.line_count, supplier_count: e.supplier_count, responded: e.responded, doc_count: e.doc_count, unread_docs: e.unread_docs,
+    question_count: e.question_count, open_chases: e.open_chases, overdue_chases: e.overdue_chases, needs_review: e.needs_review, award_status: e.award_status, starred: e.starred,
+  }));
   return (
-    <div className="min-h-screen lg:grid lg:grid-cols-[248px_1fr]">
-      <aside className="sticky top-0 hidden h-screen flex-col bg-night px-5 py-6 text-on-dark lg:flex">
-        <div className="px-1"><Logo dark /></div>
-        <div className="mt-8 overflow-y-auto"><Suspense><SidebarNav connected={connected} /></Suspense></div>
-        <div className="mt-auto grid gap-3 border-t border-white/10 pt-4">
-          <div className="flex items-center gap-3 px-1">
-            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-white/10 text-xs">{initials}</span>
-            <div className="min-w-0">
-              <p className="truncate text-sm">{user.name}</p>
-              <p className="truncate text-xs text-fog">{user.email}</p>
-            </div>
+    <div className="min-h-screen lg:flex">
+      <Suspense>
+        <AppSidebar
+          user={{ name: user.name, email: user.email, role: user.role }}
+          workspace={{ name: user.workspace_name }}
+          workspaces={workspaces}
+          events={sidebarEvents}
+          connected={Boolean(user.last_mcp_at)}
+          switchAction={switchWorkspaceAction}
+          logoutAction={logoutAction}
+        />
+      </Suspense>
+      <div className="min-w-0 flex-1">
+        <div className="sticky top-0 z-20 hidden h-14 items-center gap-3 border-b border-border bg-background/85 px-6 backdrop-blur-md lg:flex xl:px-8">
+          <SearchButton />
+          <div className="ml-auto flex items-center gap-2">
+            <NotificationBell />
+            {can(user.role, "edit") ? (
+              <NewMenu canTeam={can(user.role, "team")} openEvents={events.filter((e) => !e.archived_at && !["awarded", "closed"].includes(e.status)).map((e) => ({ id: e.id, code: e.code, title: e.title }))} />
+            ) : null}
           </div>
-          <form action={logoutAction}>
-            <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-fog hover:bg-white/5 hover:text-white">
-              <LogOut className="size-4" /> Sign out
-            </button>
-          </form>
         </div>
-      </aside>
-      <header className="flex items-center gap-3 bg-night px-4 py-3 text-on-dark lg:hidden">
-        <Logo dark />
-        <div className="ml-auto min-w-0"><Suspense><SidebarNav connected={connected} compact /></Suspense></div>
-        <form action={logoutAction}><button aria-label="Sign out" className="rounded-lg p-2 text-fog hover:text-white"><LogOut className="size-4" /></button></form>
-      </header>
-      <main className="min-w-0 px-4 py-5 sm:px-6 sm:py-6 xl:px-8">
-        <div className="mx-auto max-w-[1320px]">{children}</div>
-      </main>
+        <main className="px-4 py-5 sm:px-6 xl:px-8">
+          <div className="mx-auto max-w-[1440px]">{children}</div>
+        </main>
+      </div>
+      <CommandMenu />
+      <Suspense>
+        <FirstRun hasEvents={events.length > 0} canEdit={can(user.role, "edit")} connected={Boolean(user.last_mcp_at)} connectorUrl={`${base}/mcp/${user.mcp_token}`} />
+      </Suspense>
+      <LiveRefresh initial={version} />
     </div>
   );
 }

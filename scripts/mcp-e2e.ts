@@ -195,6 +195,18 @@ async function main() {
     check("price_history finds the item with prices", hist.includes(code ?? "none") && /₹/.test(hist));
     check("list_open_work lists the open events", (await call("list_open_work", {})).includes(copyCode ?? "none"));
 
+    // Search, suppliers, spend, unusual prices, budgets, comments, archive.
+    check("search_bidline finds the event", (await call("search_bidline", { query: code ?? "" })).includes(code ?? "none"));
+    check("supplier_scorecard covers a supplier", /Cygnus/.test(await call("supplier_scorecard", { supplier: "Cygnus" })));
+    check("spend_summary answers", /Awarded \(approved\)/.test(await call("spend_summary", {})));
+    await call("flag_unusual_prices", { rfx: code });
+    check("set_budget changes a line budget", /Updated the budget on 1 line/.test(await call("set_budget", { rfx: code, items: [{ lineNo: 1, budgetInr: 12345 }] })));
+    check("comment_on_price adds a comment", /Comment added/.test(await call("comment_on_price", { rfx: code, supplier: "V1", lineNo: 1, comment: "Confirmed by phone" })));
+    check("archive_rfx archives the copy", /archived/.test(await call("archive_rfx", { rfx: copyCode, archive: true, reason: "e2e" })));
+    check("archive_rfx restores it", /restored/.test(await call("archive_rfx", { rfx: copyCode, archive: false })));
+    const toolCount = (await client.listTools()).tools.length;
+    check("all 51 tools are offered to an admin", toolCount === 51, `${toolCount}`);
+
     await call("get_line", { rfx: "RFX-0000-0000", lineNo: 1 }, true);
     const bad = await fetch(`${BASE}/mcp/bl_not_a_real_token`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });
     check("an invalid token is refused", bad.status === 404);

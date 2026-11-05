@@ -2,59 +2,61 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { Tip } from "@/components/tip";
+import { RefreshCw, X } from "lucide-react";
 
 /**
- * Keeps the open screen in step with Claude. Polls the event counter and
- * refreshes the page when anything changed, so a quote Claude submits, or an
- * edit made in another tab, appears without reloading.
+ * Keeps every open screen in step with Claude and teammates. It polls the
+ * workspace's change counter and refreshes the page when anything changed, then
+ * says what changed in a small note. It shows nothing while nothing happens:
+ * whether Claude is connected is shown once, in the sidebar.
  */
-export function LiveRefresh({ url, initial }: { url: string; initial: number }) {
+export function LiveRefresh({ initial }: { initial: number }) {
   const router = useRouter();
   const seen = useRef(initial);
-  const [pulse, setPulse] = useState(false);
+  const [note, setNote] = useState<{ summary: string; who: string } | null>(null);
   useEffect(() => {
-    seen.current = initial;
+    seen.current = Math.max(seen.current, initial);
   }, [initial]);
   useEffect(() => {
     let stop = false;
+    let hide: ReturnType<typeof setTimeout> | undefined;
     const tick = async () => {
       if (document.visibilityState !== "visible") return;
       try {
-        const res = await fetch(url, { cache: "no-store" });
+        const res = await fetch("/api/rfx/all/version", { cache: "no-store" });
         if (!res.ok) return;
-        const { version } = (await res.json()) as { version: number };
-        if (!stop && version > seen.current) {
-          seen.current = version;
-          setPulse(true);
-          router.refresh();
-          setTimeout(() => setPulse(false), 2500);
+        // look-ups by Claude do not change anything, so they never refresh the page
+        const body = (await res.json()) as { version: number; latest?: { summary: string; who: string; mine: boolean } | null };
+        if (stop || body.version <= seen.current) return;
+        seen.current = body.version;
+        router.refresh();
+        // Your own clicks refresh quietly; changes by Claude or a teammate are named.
+        if (body.latest && !body.latest.mine) {
+          setNote({ summary: body.latest.summary, who: body.latest.who });
+          clearTimeout(hide);
+          hide = setTimeout(() => setNote(null), 6000);
         }
       } catch {
         // offline for a moment; the next tick tries again
       }
     };
-    const id = setInterval(tick, 3000);
+    const id = setInterval(tick, 10000);
     return () => {
       stop = true;
       clearInterval(id);
+      clearTimeout(hide);
     };
-  }, [url, router]);
+  }, [router]);
+  if (!note) return null;
   return (
-    <Tip text={pulse ? "Claude or another tab just changed this. The page has refreshed itself." : "This page updates by itself within a few seconds whenever Claude changes something. No need to reload."}>
-      <span
-        tabIndex={0}
-        aria-live="polite"
-        className={`inline-flex h-7 items-center gap-2 rounded-full px-2.5 text-[12px] font-medium transition-colors ${
-          pulse ? "bg-secondary text-primary" : "bg-success/10 text-success"
-        }`}
-      >
-        <span className="relative flex size-2">
-          <span className={`absolute inline-flex size-full rounded-full opacity-60 motion-safe:animate-ping ${pulse ? "bg-primary" : "bg-success [animation-duration:2.4s]"}`} />
-          <span className={`relative inline-flex size-2 rounded-full ${pulse ? "bg-primary" : "bg-success"}`} />
-        </span>
-        {pulse ? "Updated just now" : "Live"}
+    <div role="status" aria-live="polite"
+      className="fixed right-4 bottom-4 z-40 flex max-w-[380px] items-start gap-3 rounded-xl bg-night px-4 py-3 text-[13px] text-on-dark shadow-[0_18px_40px_-14px_rgba(23,23,33,0.5)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2">
+      <RefreshCw className="mt-0.5 size-3.5 shrink-0 text-fog" />
+      <span className="min-w-0">
+        <span className="font-medium">{note.who} just made a change.</span>
+        <span className="mt-0.5 line-clamp-2 block text-fog">{note.summary}</span>
       </span>
-    </Tip>
+      <button onClick={() => setNote(null)} aria-label="Dismiss" className="-mr-1 rounded p-0.5 text-fog hover:text-white"><X className="size-3.5" /></button>
+    </div>
   );
 }

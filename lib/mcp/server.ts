@@ -1,11 +1,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { signExport, type User } from "../auth";
+import { toolAllowed, type ToolInfo } from "./catalog";
+import { can } from "../roles";
 import { getEmailAccount } from "../mail";
 import { q } from "../db";
 import { logEvent, listEvents, transcriptMarkdown } from "../events";
 import {
-  BadInput, NotFound, getLineNotes, getLines, getQuestions, listRfxs, qualityGate, resolveRfx, resolveSupplier,
+  BadInput, ME_CTE, NotFound, VISIBLE, getLineNotes, getLines, getQuestions, listRfxs, qualityGate, resolveRfx, resolveSupplier,
 } from "../rfx";
 import { documentBytes, getDocument, listDocuments } from "../files";
 import { documentContent, type McpContent } from "../extract/for-claude";
@@ -20,7 +22,12 @@ import {
   setPriorPoAction, submitQuestionnaireAction, submitQuoteAction, submitSecondReadAction,
   updateRfxAction, updateSupplierAction, upsertLinesAction, type ActionCtx,
   addLineNoteAction, duplicateRfxAction, removeQuestionsAction, withdrawAwardAction,
+  addCellCommentAction, archiveRfxAction, setBudgetAction,
 } from "../actions";
+import { searchAll } from "../search";
+import { supplierDirectory } from "../directory";
+import { spend } from "../analytics";
+import { findOutliers } from "../calc/outliers";
 import { cheapestPerLine, likeForLike } from "../calc/normalise";
 import {
   cellText, gridText, inr, lineText, needsAttentionText, overview, rfxHeader, statusWords, supplierText,
@@ -42,7 +49,7 @@ const text = (t: string): ToolResult => ({ content: [{ type: "text", text: t }] 
  * Build an MCP server bound to one Bidline user. Created per request: the
  * endpoint is stateless, so any Vercel instance can answer any call.
  */
-export function buildServer(user: User, appUrl: string): McpServer {
+export function buildServer(user: User, appUrl: string, opts: { disabled?: string[]; collect?: ToolInfo[] } = {}): McpServer {
   const server = new McpServer(
     { name: "bidline", version: "1.0.0", title: "Bidline" },
     {
@@ -55,6 +62,17 @@ export function buildServer(user: User, appUrl: string): McpServer {
         "Files the user attaches in chat can be read directly and submitted the same way. If unsure, start with get_started.",
     },
   );
+
+  // Offer Claude only the tools this workspace has switched on and this person's role allows.
+  // With `collect`, nothing is registered: the definitions are listed for the Tools page.
+  const register = server.registerTool.bind(server) as (...a: unknown[]) => unknown;
+  (server as unknown as { registerTool: (...a: unknown[]) => unknown }).registerTool = (name: unknown, config: unknown, cb: unknown) => {
+    const c = config as { title?: string; description?: string; annotations?: { readOnlyHint?: boolean } };
+    const info: ToolInfo = { name: String(name), title: c.title ?? String(name), description: c.description ?? "", readOnly: Boolean(c.annotations?.readOnlyHint) };
+    if (opts.collect) return void opts.collect.push(info);
+    if (!toolAllowed(info, user.role, opts.disabled ?? [])) return undefined;
+    return register(name, config, cb);
+  };
 
   async function run(tool: string, args: { user_request?: string }, fn: (ctx: ActionCtx) => Promise<ToolResult | string>, opts: { query?: string; rfx?: string } = {}): Promise<ToolResult> {
     const ctx: ActionCtx = { userId: user.id, actor: "claude", tool, userRequest: args.user_request ?? null };
@@ -74,6 +92,8 @@ export function buildServer(user: User, appUrl: string): McpServer {
   }
 
   const ro = { readOnlyHint: true, openWorldHint: false } as const;
+  // The approval link decides an award without a login, so only people who send it (buyers) or decide (approvers) see it.
+  const mayShareLink = can(user.role, "edit") || can(user.role, "approve");
   const rw = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
 
   // -------------------------------------------------------------------------
@@ -125,8 +145,8 @@ export function buildServer(user: User, appUrl: string): McpServer {
     const rfxs = (await listRfxs(user.id)).filter((r) => !["awarded", "closed"].includes(r.status)).slice(0, 15);
     if (!rfxs.length) return "Nothing open. Every sourcing event is awarded or closed.";
     const overdue = await q<{ rfx_id: string; n: number }>(
-      `select c.rfx_id, count(*)::int as n from chases c join rfx r on r.id = c.rfx_id
-        where r.user_id = $1 and c.answered_at is null and c.closed_reason is null and c.due_at < now() group by c.rfx_id`, [user.id]);
+      `with ${ME_CTE} select c.rfx_id, count(*)::int as n from chases c join rfx r on r.id = c.rfx_id, me
+        where ${VISIBLE} and c.answered_at is null and c.closed_reason is null and c.due_at < now() group by c.rfx_id`, [user.id]);
     const cmps = await Promise.all(rfxs.map((r) => loadComparison(r)));
     const out: string[] = [];
     for (const [i, r] of rfxs.entries()) {
@@ -1003,7 +1023,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
       `select scenario_key, status, decided_by, decided_at::text, decision_note, share_token, created_at::text, snapshot from awards where rfx_id = $1 order by created_at desc`, [rfx.id],
     );
     if (!rows.length) return `No award drafted on ${rfx.code} yet.`;
-    return rows.map((a) => `- ${a.created_at.slice(0, 16)} ${a.snapshot.label}, ${inr(a.snapshot.totalInr)}: ${a.status.replace(/_/g, " ")}${a.decided_by ? ` by ${a.decided_by}` : ""}${a.decision_note ? ` ("${a.decision_note}")` : ""}. ${appUrl}/share/${a.share_token}`).join("\n");
+    return rows.map((a) => `- ${a.created_at.slice(0, 16)} ${a.snapshot.label}, ${inr(a.snapshot.totalInr)}: ${a.status.replace(/_/g, " ")}${a.decided_by ? ` by ${a.decided_by}` : ""}${a.decision_note ? ` ("${a.decision_note}")` : ""}.${a.status === "sent" && mayShareLink ? ` Approval link: ${appUrl}/share/${a.share_token}` : ""}`).join("\n");
   }, { query: "Checked the award status.", rfx: args.rfx ?? "" }));
 
   // -------------------------------------------------------------------------
@@ -1045,5 +1065,111 @@ export function buildServer(user: User, appUrl: string): McpServer {
     return events.map((e) => `${String(e.created_at).slice(0, 16).replace("T", " ")} | ${e.actor} | ${e.tool ?? e.kind} | ${e.summary}`).join("\n");
   }));
 
+  // -------------------------------------------------------------------------
+  // Across events: search, suppliers, spend, unusual prices, budgets, archive, comments
+  // -------------------------------------------------------------------------
+
+  server.registerTool("search_bidline", {
+    title: "Search everything",
+    description: "Find sourcing events, suppliers, documents and line items by words, a code, a GSTIN or a file name, across every event the user can see. Returns links into the app.",
+    inputSchema: { query: z.string(), user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("search_bidline", args, async () => {
+    const hits = await searchAll(user.id, args.query);
+    if (!hits.length) return `Nothing matches "${args.query}".`;
+    return hits.map((h) => `${h.type.toUpperCase()} | ${h.title} | ${h.sub} | ${appUrl}${h.href}`).join("\n");
+  }, { query: `Searched for "${args.query}"` }));
+
+  server.registerTool("supplier_scorecard", {
+    title: "Supplier scorecard",
+    description: "How one supplier (or all, if no name is given) has done across sourcing events: how often asked, reply rate, declines, lines and value won on approved awards, prices that had to be corrected, follow-ups and overdue replies.",
+    inputSchema: { supplier: z.string().optional().describe("Name or GSTIN. Leave out for every supplier."), user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("supplier_scorecard", args, async () => {
+    const all = await supplierDirectory(user.id);
+    const t = args.supplier?.trim().toLowerCase();
+    const rows = t ? all.filter((r) => `${r.name} ${r.gstin ?? ""}`.toLowerCase().includes(t)) : all;
+    if (!rows.length) return t ? `No supplier matches "${args.supplier}".` : "No suppliers yet.";
+    return rows.slice(0, 25).map((r) =>
+      `${r.name}${r.gstin ? ` (GSTIN ${r.gstin})` : ""}: asked in ${r.events} event${r.events === 1 ? "" : "s"}, quoted in ${r.responded}, declined ${r.declined}; ` +
+      `won ${r.lines_won} line${r.lines_won === 1 ? "" : "s"} worth ${inr(r.won_inr)} on approved awards; ${r.corrections} price correction${r.corrections === 1 ? "" : "s"}; ` +
+      `${r.follow_ups} follow-up${r.follow_ups === 1 ? "" : "s"}, ${r.overdue} overdue. Events: ${r.rfx.map((x) => x.code).join(", ")}`).join("\n");
+  }, { query: args.supplier ? `Scorecard for ${args.supplier}` : "Supplier scorecards" }));
+
+  server.registerTool("spend_summary", {
+    title: "Spend summary",
+    description: "Committed spend from approved awards against budget, by category, supplier, event and month, plus budget still planned on open events. Bidline's figures from each award's snapshot; quote them, do not recalculate.",
+    inputSchema: { user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("spend_summary", args, async () => {
+    const sp = await spend(user.id);
+    const { awarded, baseline } = sp.totals;
+    return [
+      `Awarded (approved): ${inr(awarded)}. Budget for those lines: ${baseline ? inr(baseline) : "not set"}. Saved against budget: ${baseline ? inr(baseline - awarded) : "n/a"}.`,
+      "", "BY CATEGORY", ...sp.byCategory.map((c) => `- ${c.category}: ${inr(c.awarded)} awarded, budget ${inr(c.baseline)}, ${c.lines} lines`),
+      "", "BY SUPPLIER", ...sp.bySupplier.map((x) => `- ${x.supplier}: ${inr(x.awarded)}, ${x.lines} lines, ${x.events} events`),
+      "", "BY EVENT", ...sp.byEvent.map((e) => `- ${e.code} ${e.title}: budget ${inr(e.budget)}, ${e.awarded === null ? "no approved award" : `awarded ${inr(e.awarded)}`}`),
+      "", "BY MONTH", ...sp.byMonth.map((m) => `- ${m.month}: ${inr(m.awarded)} across ${m.awards} award${m.awards === 1 ? "" : "s"}`),
+    ].join("\n");
+  }, { query: "Spend summary" }));
+
+  server.registerTool("flag_unusual_prices", {
+    title: "Flag unusual prices",
+    description: "Prices on an event that are far below or above the other suppliers' middle price for the same line, or far from the budget. Each is a prompt to check the model, unit or reading, not a verdict.",
+    inputSchema: { rfx: RFX, user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("flag_unusual_prices", args, async () => {
+    const rfx = await resolveRfx(user.id, args.rfx);
+    const cmp = await loadComparison(rfx);
+    const prices = cmp.suppliers.flatMap((sup) => cmp.lines.map((l) => {
+      const c = cmp.matrix[sup.code]?.[l.no];
+      return { lineNo: l.no, supplier: sup.code, unitInr: c?.unitInr ?? null, comparable: c?.status === "comparable" || c?.status === "comparable_with_caveat" };
+    }));
+    const flags = findOutliers(cmp.lines, prices);
+    if (!flags.length) return `No unusual prices on ${rfx.code}.`;
+    return `${flags.length} unusual price${flags.length === 1 ? "" : "s"} on ${rfx.code}:\n` + flags.map((f) => `- L${f.lineNo} ${f.supplier}: ${inr(f.unitInr)} per unit, unusually ${f.kind}. ${f.note}`).join("\n");
+  }, { query: "Checked for unusual prices", rfx: args.rfx ?? undefined }));
+
+  server.registerTool("set_budget", {
+    title: "Set line budgets",
+    description: "Set or change the budget unit price (INR, ex-GST) on one or more lines. Use null to clear. Budgets drive savings figures and the unusual-price flags. Logged with before and after.",
+    inputSchema: {
+      rfx: RFX,
+      items: z.array(z.object({ lineNo: z.number().int().positive(), budgetInr: z.number().nonnegative().nullable() })).min(1),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("set_budget", args, async (ctx) => {
+    const r = await setBudgetAction(ctx, args.rfx, args.items);
+    return r.changed ? `Updated the budget on ${r.changed} line${r.changed === 1 ? "" : "s"} of ${r.rfx.code}.` : "Nothing changed: those budgets were already set.";
+  }));
+
+  server.registerTool("archive_rfx", {
+    title: "Archive or restore an event",
+    description: "Archive a finished or abandoned sourcing event so it leaves the lists (its record is kept in full), or restore an archived one. Nothing is deleted.",
+    inputSchema: { rfx: RFX, archive: z.boolean().default(true).describe("false to restore"), reason: z.string().optional(), user_request: USER_REQUEST },
+    annotations: rw,
+  }, async (args) => run("archive_rfx", args, async (ctx) => {
+    const r = await archiveRfxAction(ctx, args.rfx, args.archive ?? true, args.reason);
+    return args.archive === false ? `${r.code} is restored.` : `${r.code} is archived. Restore it any time.`;
+  }));
+
+  server.registerTool("comment_on_price", {
+    title: "Comment on a price",
+    description: "Add a comment to one supplier's price on one line, e.g. 'Vector confirmed this includes 3 years warranty on the phone'. Shown beside the price in the app and kept in the audit trail. Never changes the price.",
+    inputSchema: { rfx: RFX, supplier: z.string(), lineNo: z.number().int().positive(), comment: z.string(), user_request: USER_REQUEST },
+    annotations: rw,
+  }, async (args) => run("comment_on_price", args, async (ctx) => {
+    const r = await addCellCommentAction(ctx, { rfx: args.rfx, supplier: args.supplier, lineNo: args.lineNo, text: args.comment });
+    return `Comment added to ${r.supplier.code} line ${args.lineNo} on ${r.rfx.code}.`;
+  }));
+
   return server;
+}
+
+/** Every tool Bidline defines, for the Tools page. */
+export function toolCatalog(): ToolInfo[] {
+  const out: ToolInfo[] = [];
+  buildServer({ id: "", email: "", name: "", mcp_token: "", last_mcp_at: null, workspace_id: "", workspace_name: "", role: "admin" }, "", { collect: out });
+  return out;
 }

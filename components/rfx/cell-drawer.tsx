@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { STATUS_ACTION } from "@/lib/ui";
 import type { CellStatus } from "@/lib/calc/normalise";
 import type { CellView, GridView, SupplierView } from "@/lib/view";
-import { cellHistory, correctCellUI, undoCorrectionUI, type FormState } from "@/app/actions";
+import { addCellCommentUI, cellComments, cellHistory, correctCellUI, undoCorrectionUI, type FormState } from "@/app/actions";
 import { Field, FormMessage, SubmitButton, fieldClass } from "@/components/form-bits";
 
 const num = (n: number | null | undefined) => (n === null || n === undefined ? "" : Math.round(n).toLocaleString("en-IN"));
@@ -146,6 +146,8 @@ export function CellDrawer({ rfxId, supplier, line, cell, isBest, onClose }: {
             </form>
           </section>
 
+          <Comments rfxId={rfxId} supplier={supplier.code} lineNo={line.no} />
+
           <section className="grid gap-2">
             <p className="eyebrow">History</p>
             {history.length ? (
@@ -162,5 +164,40 @@ export function CellDrawer({ rfxId, supplier, line, cell, isBest, onClose }: {
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+type Comment = { id: string; text: string; created_at: string; actor: string; name: string | null };
+
+/** Colleagues talking about this one price, where it lives. Stored with the event and in the audit log. */
+function Comments({ rfxId, supplier, lineNo }: { rfxId: string; supplier: string; lineNo: number }) {
+  const [list, setList] = useState<Comment[]>([]);
+  const [state, action] = useActionState<FormState, FormData>(addCellCommentUI.bind(null, rfxId, supplier, lineNo), {});
+  useEffect(() => {
+    let live = true;
+    cellComments(rfxId, supplier, lineNo).then((c) => live && setList(c)).catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [rfxId, supplier, lineNo, state]);
+  return (
+    <section className="grid gap-2">
+      <p className="eyebrow">Comments</p>
+      {list.length ? (
+        <ol className="grid gap-2">
+          {list.map((c) => (
+            <li key={c.id} className="rounded-lg bg-muted px-3 py-2 text-sm">
+              <span className="text-xs text-ink-secondary">{c.actor === "claude" ? `Claude for ${c.name ?? "a teammate"}` : c.name ?? "Someone"} · {new Date(c.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span>
+              <p className="mt-0.5 whitespace-pre-wrap">{c.text}</p>
+            </li>
+          ))}
+        </ol>
+      ) : <p className="text-sm text-ink-secondary">No comments. Note what a supplier confirmed on the phone, or ask a colleague to check.</p>}
+      <form key={list.length} action={action} className="flex items-start gap-2">
+        <textarea name="text" rows={2} required placeholder="Add a comment" className="min-h-[38px] flex-1 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30" />
+        <SubmitButton size="sm">Post</SubmitButton>
+      </form>
+      {state.error ? <p role="alert" className="text-sm text-destructive">{state.error}</p> : null}
+    </section>
   );
 }

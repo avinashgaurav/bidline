@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { newId, one, q } from "./db";
+import type { Role } from "./roles";
 
 const scryptAsync = promisify(scrypt) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 
@@ -12,6 +13,38 @@ export interface User {
   name: string;
   mcp_token: string;
   last_mcp_at: string | null;
+  /** True when Claude connected with the person's read-only link: it is offered reading tools only. */
+  read_only_link?: boolean;
+  /** The workspace this person is working in, their role there and its name. */
+  workspace_id: string;
+  workspace_name: string;
+  role: Role;
+}
+
+// One person, with the workspace they are working in. A person who has lost
+// their membership (removed by an admin) gets a fresh workspace of their own.
+const USER_SQL = `select u.id, u.email, u.name, u.mcp_token, u.last_mcp_at, u.workspace_id, w.name as workspace_name, m.role
+  from users u
+  left join workspaces w on w.id = u.workspace_id
+  left join workspace_members m on m.workspace_id = u.workspace_id and m.user_id = u.id`;
+
+type RawUser = Omit<User, "role" | "workspace_id" | "workspace_name"> & { workspace_id: string | null; workspace_name: string | null; role: string | null };
+
+async function withWorkspace(row: RawUser | null): Promise<User | null> {
+  if (!row) return null;
+  if (row.workspace_id && row.role) return row as User;
+  const other = await one<{ workspace_id: string }>("select workspace_id from workspace_members where user_id = $1 order by created_at limit 1", [row.id]);
+  const ws = other?.workspace_id ?? (await createWorkspace(row.id, `${row.name.split(" ")[0]}'s workspace`));
+  await q("update users set workspace_id = $2 where id = $1", [row.id, ws]);
+  return one<User>(`${USER_SQL} where u.id = $1`, [row.id]);
+}
+
+/** A new workspace with this person as its admin. */
+export async function createWorkspace(userId: string, name: string): Promise<string> {
+  const id = newId("ws");
+  await q("insert into workspaces (id, name) values ($1, $2)", [id, name.trim().slice(0, 80) || "Workspace"]);
+  await q("insert into workspace_members (workspace_id, user_id, role) values ($1, $2, 'admin')", [id, userId]);
+  return id;
 }
 
 const COOKIE = "bidline_session";
@@ -91,10 +124,7 @@ export async function currentUser(): Promise<User | null> {
   const jar = await cookies();
   const userId = decodeSession(jar.get(COOKIE)?.value);
   if (!userId) return null;
-  return one<User>(
-    "select id, email, name, mcp_token, last_mcp_at from users where id = $1",
-    [userId],
-  );
+  return withWorkspace(await one<RawUser>(`${USER_SQL} where u.id = $1`, [userId]));
 }
 
 /** For pages: send anyone not signed in to the login screen. */
@@ -106,34 +136,46 @@ export async function requireUser(): Promise<User> {
 
 export async function userByMcpToken(token: string): Promise<User | null> {
   if (!token || !token.startsWith("bl_")) return null;
-  return one<User>(
-    "select id, email, name, mcp_token, last_mcp_at from users where mcp_token = $1",
-    [token],
-  );
+  const u = await withWorkspace(await one<RawUser>(`${USER_SQL} where u.mcp_token = $1 or u.mcp_token_ro = $1`, [token]));
+  // The read-only link works like a Viewer's: Claude is offered reading tools only.
+  return u && u.mcp_token !== token ? { ...u, role: "viewer", read_only_link: true } : u;
 }
 
 export const normaliseEmail = (e: string) => e.trim().toLowerCase();
 
-export async function createUser(opts: { email: string; name: string; password: string }): Promise<User> {
+export async function createUser(opts: { email: string; name: string; password: string; company?: string; invite?: string | null }): Promise<User> {
   const id = newId("usr");
   const email = normaliseEmail(opts.email);
   await q(
     "insert into users (id, email, name, password_hash, mcp_token) values ($1,$2,$3,$4,$5)",
     [id, email, opts.name.trim() || email.split("@")[0], await hashPassword(opts.password), newMcpToken()],
   );
-  const user = await one<User>("select id, email, name, mcp_token, last_mcp_at from users where id = $1", [id]);
+  // Signing up from an invite link joins that workspace with the invited role: the link,
+  // not just the email address, is the proof. Otherwise start a workspace of one's own.
+  const invite = opts.invite
+    ? await one<{ id: string; workspace_id: string }>("select id, workspace_id from workspace_invites where id = $1 and email = $2 and accepted_at is null", [opts.invite, email])
+    : null;
+  if (invite) {
+    await q("insert into workspace_members (workspace_id, user_id, role, added_by) select workspace_id, $2, role, invited_by from workspace_invites where id = $1 on conflict do nothing", [invite.id, id]);
+    await q("update workspace_invites set accepted_at = now() where id = $1", [invite.id]);
+    await q("update users set workspace_id = $2 where id = $1", [id, invite.workspace_id]);
+  } else {
+    const ws = await createWorkspace(id, opts.company?.trim() || `${(opts.name.trim() || email).split(/[\s@]/)[0]}'s workspace`);
+    await q("update users set workspace_id = $2 where id = $1", [id, ws]);
+  }
+  const user = await one<User>(`${USER_SQL} where u.id = $1`, [id]);
   if (!user) throw new Error("user was not created");
   return user;
 }
 
 export async function checkLogin(email: string, password: string): Promise<User | null> {
-  const row = await one<User & { password_hash: string }>(
-    "select id, email, name, mcp_token, last_mcp_at, password_hash from users where email = $1",
+  const row = await one<{ id: string; password_hash: string }>(
+    "select id, password_hash from users where email = $1",
     [normaliseEmail(email)],
   );
   if (!row) return null;
   if (!(await verifyPassword(password, row.password_hash))) return null;
-  return { id: row.id, email: row.email, name: row.name, mcp_token: row.mcp_token, last_mcp_at: row.last_mcp_at };
+  return withWorkspace(await one<RawUser>(`${USER_SQL} where u.id = $1`, [row.id]));
 }
 
 // ---------------------------------------------------------------------------
@@ -194,4 +236,16 @@ export function verifyExport(token: string, rfxId: string, kind: string): string
   const [userId, rid, k, exp] = payload.split(".");
   if (rid !== rfxId || k !== kind || Number(exp) < Date.now()) return null;
   return userId;
+}
+
+/** Accept an invite link while signed in: only for the address it was sent to. */
+export async function acceptInvite(userId: string, inviteId: string): Promise<string | null> {
+  const row = await one<{ workspace_id: string; role: string; invited_by: string | null }>(
+    `select i.workspace_id, i.role, i.invited_by from workspace_invites i join users u on u.email = i.email
+      where i.id = $1 and u.id = $2 and i.accepted_at is null`, [inviteId, userId]);
+  if (!row) return null;
+  await q("insert into workspace_members (workspace_id, user_id, role, added_by) values ($1,$2,$3,$4) on conflict do nothing", [row.workspace_id, userId, row.role, row.invited_by]);
+  await q("update workspace_invites set accepted_at = now() where id = $1", [inviteId]);
+  await q("update users set workspace_id = $2 where id = $1", [userId, row.workspace_id]);
+  return row.workspace_id;
 }

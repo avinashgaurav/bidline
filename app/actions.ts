@@ -1,15 +1,22 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { refresh } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import {
   checkLogin, clearLoginFailures, createUser, endSession, newMcpToken, normaliseEmail, recordLoginAttempt, requireUser, startSession,
 } from "@/lib/auth";
 import { one, q } from "@/lib/db";
 import { logEvent } from "@/lib/events";
-import { BadInput, NotFound } from "@/lib/rfx";
+import { BadInput, NotFound, resolveRfx } from "@/lib/rfx";
 import * as A from "@/lib/actions";
+import * as T from "@/lib/team";
+import * as W from "@/lib/workspace";
+import { toolCatalog } from "@/lib/mcp/server";
+import { LOCKED_TOOLS } from "@/lib/mcp/catalog";
+import { NOTIFY_KINDS, saveNotify, type NotifyKind } from "@/lib/notify";
+import { setTodo } from "@/lib/todo-state";
+import * as C from "@/lib/channels";
 import { seedDemoRfx } from "@/lib/demo";
 import { disconnectEmail, getEmailAccount, saveEmailAccount, sendMail } from "@/lib/mail";
 
@@ -62,7 +69,9 @@ export async function loginAction(_: FormState, f: FormData): Promise<FormState>
   await clearLoginFailures(email);
   await startSession(user.id);
   await logEvent({ userId: user.id, actor: "user", kind: "login", summary: `Signed in as ${user.email}.` });
-  redirect("/");
+  revalidatePath("/", "layout");
+  const next = str(f, "next");
+  redirect(/^\/invite\/[A-Za-z0-9_-]{8,64}$/.test(next) ? next : "/");
 }
 
 export async function signupAction(_: FormState, f: FormData): Promise<FormState> {
@@ -74,9 +83,10 @@ export async function signupAction(_: FormState, f: FormData): Promise<FormState
   if (await one("select 1 from users where email = $1", [normaliseEmail(email)])) {
     return { error: "An account with that email already exists. Sign in instead." };
   }
-  const user = await createUser({ email, name, password });
+  const user = await createUser({ email, name, password, invite: str(f, "invite") || null });
   await startSession(user.id);
   await logEvent({ userId: user.id, actor: "user", kind: "signup", summary: `Created account ${user.email}.` });
+  revalidatePath("/", "layout");
   redirect("/");
 }
 
@@ -95,14 +105,18 @@ export async function regenerateTokenAction(): Promise<FormState> {
 
 export async function loadDemoAction(): Promise<FormState> {
   const user = await requireUser();
-  let rfxId: string;
   try {
-    rfxId = await seedDemoRfx(user.id);
+    await A.requireWorkspacePerm(user.id, "edit");
+    await seedDemoRfx(user.id);
   } catch (e) {
+    if (e instanceof BadInput) return { error: e.message };
     console.error(e);
     return { error: `Could not load the demo event: ${(e as Error).message}` };
   }
-  redirect(`/rfx/${rfxId}?tab=overview`);
+  // First run continues on the organisation dashboard, where the connect step follows.
+  // The sidebar lives in the layout, so it is refreshed too.
+  revalidatePath("/", "layout");
+  redirect("/?welcome=demo");
 }
 
 
@@ -124,6 +138,7 @@ export async function createRfxUI(_: FormState, f: FormData): Promise<FormState>
     id = r.rfx.id;
   });
   if (res.error) return res;
+  revalidatePath("/", "layout");
   redirect(`/rfx/${id}?tab=lines`);
 }
 
@@ -259,7 +274,7 @@ export async function decideAwardUI(token: string, _: FormState, f: FormData): P
 
 export async function cellHistory(rfxId: string, key: string) {
   const user = await requireUser();
-  const own = await one("select 1 from rfx where id = $1 and user_id = $2", [rfxId, user.id]);
+  const own = await resolveRfx(user.id, rfxId).catch(() => null);
   if (!own) return [];
   const code = key.split(":")[0];
   return q<{ id: string; created_at: string; actor: string; summary: string; user_request: string | null }>(
@@ -361,6 +376,7 @@ export async function duplicateRfxUI(rfxId: string, _: FormState, f: FormData): 
     id = r.rfx.id;
   });
   if (res.error) return res;
+  revalidatePath("/", "layout");
   redirect(`/rfx/${id}?tab=lines`);
 }
 
@@ -376,4 +392,153 @@ export async function addLineNoteUI(rfxId: string, _: FormState, f: FormData): P
   const lineNo = Number(str(f, "lineNo"));
   if (!lineNo) return { error: "Choose a line." };
   return act((ctx) => A.addLineNoteAction(ctx, rfxId, lineNo, str(f, "text")), "Note added.");
+}
+
+// ---------------------------------------------------------------------------
+// Team, access, workspace (admins), and the things every member can do
+// ---------------------------------------------------------------------------
+
+async function guarded(fn: (userId: string) => Promise<unknown>, message?: string): Promise<FormState> {
+  try {
+    const user = await requireUser();
+    await fn(user.id);
+    refresh();
+    return { ok: true, message };
+  } catch (e) {
+    if (e instanceof BadInput || e instanceof NotFound) return { error: e.message };
+    console.error(e);
+    return { error: `Something went wrong: ${(e as Error).message}` };
+  }
+}
+
+export async function switchWorkspaceAction(f: FormData) {
+  const user = await requireUser();
+  await T.switchWorkspace(user.id, str(f, "workspace"));
+  revalidatePath("/", "layout");
+  redirect("/");
+}
+
+export async function inviteMemberUI(_: FormState, f: FormData): Promise<FormState> {
+  let inv = { id: "", existing: false };
+  const email = str(f, "email");
+  const res = await guarded(async (uid) => { inv = await T.inviteMember(uid, email, str(f, "role")); });
+  if (res.error) return res;
+  const link = await inviteLink(inv.id, email, inv.existing);
+  return { ok: true, message: `Invite saved. Send ${email} this link: ${link}` };
+}
+
+async function inviteLink(id: string, email: string, existing: boolean) {
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
+  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
+  return existing ? `${proto}://${host}/invite/${id}` : `${proto}://${host}/signup?invite=${id}&email=${encodeURIComponent(email)}`;
+}
+
+export async function changeRoleUI(memberId: string, _: FormState, f: FormData): Promise<FormState> {
+  return guarded((uid) => T.changeRole(uid, memberId, str(f, "role")), "Role changed.");
+}
+
+export async function removeMemberUI(memberId: string): Promise<FormState> {
+  return guarded((uid) => T.removeMember(uid, memberId), "Removed from the workspace.");
+}
+
+export async function cancelInviteUI(inviteId: string): Promise<FormState> {
+  return guarded((uid) => T.cancelInvite(uid, inviteId), "Invite cancelled.");
+}
+
+export async function renameWorkspaceUI(_: FormState, f: FormData): Promise<FormState> {
+  return guarded((uid) => T.renameWorkspace(uid, str(f, "name")), "Workspace renamed.");
+}
+
+export async function setEventAccessUI(rfxId: string, _: FormState, f: FormData): Promise<FormState> {
+  const restricted = str(f, "restricted") === "yes";
+  const people = f.getAll("people").map(String);
+  return guarded((uid) => T.setEventAccess(uid, rfxId, restricted, people), restricted ? "Access limited to the people chosen." : "Everyone in the workspace can see this event.");
+}
+
+export async function setToolUI(tool: string, enabled: boolean): Promise<FormState> {
+  return guarded(async (uid) => {
+    const catalog = toolCatalog().map((t) => t.name);
+    await T.setToolEnabled(uid, tool, enabled, catalog, LOCKED_TOOLS);
+  }, enabled ? "Tool switched on." : "Tool switched off for everyone in this workspace.");
+}
+
+export async function saveWorkspaceSettingsUI(_: FormState, f: FormData): Promise<FormState> {
+  return guarded((uid) => W.saveSettings(uid, {
+    reminders: { enabled: str(f, "remindersEnabled") === "on", everyDays: Number(str(f, "remindersEveryDays")) || 3 },
+    approvalSteps: [0, 1, 2].map((i) => ({
+      aboveInr: numOrNull(f, `step${i}Above`), name: str(f, `step${i}Name`), email: str(f, `step${i}Email`),
+    })).filter((x) => x.name && x.aboveInr !== null) as Array<{ aboveInr: number; name: string; email: string }>,
+    maxSupplierSharePct: numOrNull(f, "maxSupplierSharePct"),
+    approvalExpiryDays: numOrNull(f, "approvalExpiryDays") ?? 0,
+  }), "Settings saved.");
+}
+
+export async function archiveRfxUI(rfxId: string, archive: boolean, _: FormState, f: FormData): Promise<FormState> {
+  const res = await act((ctx) => A.archiveRfxAction(ctx, rfxId, archive, str(f, "reason")), archive ? "Archived. Find it under Sourcing events, Archived." : "Restored.");
+  if (res.error || !archive) return res;
+  revalidatePath("/", "layout");
+  redirect("/events");
+}
+
+export async function decideAwardInAppUI(rfxId: string, awardId: string, _: FormState, f: FormData): Promise<FormState> {
+  const decision = str(f, "decision") as "approved" | "rejected" | "changes_requested";
+  if (!["approved", "rejected", "changes_requested"].includes(decision)) return { error: "Choose a decision." };
+  if (decision !== "approved" && !str(f, "note")) return { error: "Say why, so the buyer knows what to change." };
+  return act((ctx) => A.decideAwardInAppAction(ctx, rfxId, awardId, decision, str(f, "note") || null), "Decision recorded.");
+}
+
+export async function addCellCommentUI(rfxId: string, supplier: string, lineNo: number, _: FormState, f: FormData): Promise<FormState> {
+  return act((ctx) => A.addCellCommentAction(ctx, { rfx: rfxId, supplier, lineNo, text: str(f, "text") }), "Comment added.");
+}
+
+/** The conversation on one price, oldest first. Empty when the person cannot see the event. */
+export async function cellComments(rfxId: string, supplier: string, lineNo: number) {
+  const user = await requireUser();
+  const rfx = await resolveRfx(user.id, rfxId).catch(() => null);
+  if (!rfx) return [];
+  return q<{ id: string; text: string; created_at: string; actor: string; name: string | null }>(
+    `select c.id, c.text, c.created_at, c.actor, u.name from cell_comments c join suppliers s on s.id = c.supplier_id
+       left join users u on u.id = c.user_id
+      where c.rfx_id = $1 and s.code = $2 and c.line_no = $3 order by c.created_at`,
+    [rfx.id, supplier, lineNo],
+  );
+}
+
+export async function saveNotifyUI(_: FormState, f: FormData): Promise<FormState> {
+  return guarded(async (uid) => {
+    const prefs = Object.fromEntries(NOTIFY_KINDS.map((k) => [k.key, f.get(k.key) === "on"])) as Record<NotifyKind, boolean>;
+    await saveNotify(uid, prefs);
+  }, "Notification choices saved.");
+}
+
+export async function starRfxUI(rfxId: string, on: boolean): Promise<FormState> {
+  return guarded(async (uid) => {
+    const rfx = await resolveRfx(uid, rfxId);
+    if (on) await q("insert into rfx_stars (user_id, rfx_id) values ($1,$2) on conflict do nothing", [uid, rfx.id]);
+    else await q("delete from rfx_stars where user_id = $1 and rfx_id = $2", [uid, rfx.id]);
+  });
+}
+
+export async function setTodoUI(input: { key: string; rfxId: string; text: string; assignTo?: string | null; snoozeDays?: number | null }): Promise<FormState> {
+  return guarded((uid) => setTodo(uid, input), input.assignTo !== undefined ? "Assigned." : input.snoozeDays ? "Snoozed." : "Back on the list.");
+}
+
+export async function readOnlyLinkUI(create: boolean): Promise<FormState> {
+  return guarded(async (uid) => {
+    await q("update users set mcp_token_ro = $2 where id = $1", [uid, create ? newMcpToken() : null]);
+    await logEvent({ userId: uid, actor: "user", kind: "token_regenerated", summary: create ? "Created a read-only Claude connector link." : "Turned off the read-only Claude connector link.", detail: {} });
+  }, create ? "Read-only link created." : "Read-only link turned off.");
+}
+
+export async function addChannelUI(_: FormState, f: FormData): Promise<FormState> {
+  return guarded((uid) => C.addChannel(uid, { kind: str(f, "kind"), name: str(f, "name"), url: str(f, "url"), events: f.getAll("events").map(String) }), "Channel added. Send a test to check it.");
+}
+
+export async function removeChannelUI(id: string): Promise<FormState> {
+  return guarded((uid) => C.removeChannel(uid, id), "Channel removed.");
+}
+
+export async function testChannelUI(id: string): Promise<FormState> {
+  return guarded((uid) => C.testChannel(uid, id), "Test message sent.");
 }

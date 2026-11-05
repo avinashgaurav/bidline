@@ -1,24 +1,19 @@
 import { Logo } from "@/components/brand";
+import { AuthStory } from "@/components/auth/auth-story";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="grid min-h-screen lg:grid-cols-[1.1fr_1fr]">
-      <aside className="hidden flex-col justify-between bg-night p-12 text-on-dark lg:flex">
-        <Logo dark />
-        <div className="max-w-md">
-          <p className="eyebrow !text-fog">Supplier quote comparison</p>
-          <h1 className="mt-4 text-[42px] leading-[1.15]">Claude reads the quotes. Bidline does the calculations.</h1>
-          <p className="mt-5 text-[18px] leading-relaxed text-fog" style={{ fontWeight: 360 }}>
-            Suppliers send quotes as spreadsheets, PDFs, emails and photos. Your Claude reads them. Bidline builds one
-            like-for-like comparison, links every price to the supplier&apos;s document, and routes the award for
-            approval.
-          </p>
+    <div className="grid min-h-dvh lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
+      {/* On phones the form comes first and the story follows it; from lg up the story sits on the left. */}
+      <aside className="order-last flex flex-col bg-night px-6 py-12 text-on-dark sm:px-10 lg:order-none lg:min-h-dvh lg:px-10 lg:py-10 xl:px-20">
+        <div className="hidden lg:block"><Logo dark /></div>
+        <div className="flex flex-1 items-center lg:py-8">
+          <AuthStory />
         </div>
-        <p className="text-xs text-fog">Bidline has no AI inside. Your Claude plan reads the documents.</p>
       </aside>
-      <main className="flex items-center justify-center p-6">
-        <div className="w-full max-w-sm">
-          <div className="mb-8 lg:hidden"><Logo /></div>
+      <main className="flex min-h-dvh flex-col px-6 py-8 sm:px-10 lg:sticky lg:top-0 lg:h-dvh lg:py-10">
+        <div className="lg:hidden"><Logo /></div>
+        <div className="mx-auto flex w-full max-w-[380px] flex-1 flex-col justify-center py-12 lg:py-0">
           {children}
         </div>
       </main>

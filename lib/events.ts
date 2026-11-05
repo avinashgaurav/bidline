@@ -21,6 +21,8 @@ export interface EventInput {
   userRequest?: string | null;
   summary: string;
   detail?: Record<string, unknown>;
+  /** For workspace-level entries (team changes) with no event. Defaults to the event's or the person's workspace. */
+  workspaceId?: string | null;
 }
 
 export interface EventRow {
@@ -34,16 +36,19 @@ export interface EventRow {
   summary: string;
   detail: Record<string, unknown>;
   created_at: string;
+  /** The person (or the person whose Claude it was). */
+  user_name?: string | null;
 }
 
 export async function logEvent(e: EventInput): Promise<void> {
   await q(
-    `insert into events (user_id, rfx_id, actor, kind, tool, user_request, summary, detail)
-     values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+    `insert into events (user_id, rfx_id, actor, kind, tool, user_request, summary, detail, workspace_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,
+       coalesce($9, (select workspace_id from rfx where id = $2), (select workspace_id from users where id = $1)))`,
     [
       e.userId, e.rfxId ?? null, e.actor, e.kind, e.tool ?? null,
       e.userRequest?.trim() ? e.userRequest.trim().slice(0, 4000) : null,
-      e.summary.slice(0, 2000), json(e.detail ?? {}),
+      e.summary.slice(0, 2000), json(e.detail ?? {}), e.workspaceId ?? null,
     ],
   );
   if (e.rfxId) await q("update rfx set updated_at = now() where id = $1", [e.rfxId]);
@@ -52,24 +57,20 @@ export async function logEvent(e: EventInput): Promise<void> {
 /** Highest event id for an RFx (or a user's whole workspace). Screens poll this. */
 export async function versionOf(opts: { rfxId?: string; userId?: string }): Promise<number> {
   const row = opts.rfxId
-    ? await one<{ v: string | null }>("select max(id) as v from events where rfx_id = $1", [opts.rfxId])
-    : await one<{ v: string | null }>("select max(id) as v from events where user_id = $1", [opts.userId]);
+    ? await one<{ v: string | null }>("select max(id) as v from events where rfx_id = $1 and kind <> 'query'", [opts.rfxId])
+    : await one<{ v: string | null }>("select max(id) as v from events where workspace_id = (select workspace_id from users where id = $1) and kind <> 'query'", [opts.userId]);
   return Number(row?.v ?? 0);
 }
 
 export async function listEvents(opts: {
-  rfxId?: string; userId?: string; limit?: number; sinceId?: number;
+  rfxId: string; limit?: number; sinceId?: number;
 }): Promise<EventRow[]> {
   const limit = Math.min(opts.limit ?? 200, 2000);
-  if (opts.rfxId) {
-    return q<EventRow>(
-      `select * from events where rfx_id = $1 and id > $2 order by id desc limit $3`,
-      [opts.rfxId, opts.sinceId ?? 0, limit],
-    );
-  }
+  // One event's trail. The organisation-wide log goes through lib/audit.ts, which checks access.
   return q<EventRow>(
-    `select * from events where user_id = $1 and id > $2 order by id desc limit $3`,
-    [opts.userId, opts.sinceId ?? 0, limit],
+    `select e.*, u.name as user_name from events e left join users u on u.id = e.user_id
+      where e.rfx_id = $1 and e.id > $2 order by e.id desc limit $3`,
+    [opts.rfxId, opts.sinceId ?? 0, limit],
   );
 }
 

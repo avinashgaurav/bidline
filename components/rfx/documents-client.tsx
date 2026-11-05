@@ -81,23 +81,23 @@ export function DocumentRowForm({ rfxId, doc, suppliers }: {
 }) {
   const [state, action] = useActionState<FormState, FormData>(updateDocumentUI.bind(null, rfxId, doc.id), {});
   return (
-    <form action={action} className="flex flex-wrap items-center gap-2" onChange={(e) => (e.currentTarget as HTMLFormElement).requestSubmit()}>
-      <select name="supplier" defaultValue={doc.supplier_code ?? ""} className={`${fieldClass} h-8 w-auto text-xs`} aria-label="Supplier">
+    <form action={action} className="grid gap-2" onChange={(e) => (e.currentTarget as HTMLFormElement).requestSubmit()}>
+      <select name="supplier" defaultValue={doc.supplier_code ?? ""} className={`${fieldClass} h-8 text-[13px]`} aria-label="Supplier">
         <option value="">Supplier unknown</option>
         {suppliers.map((s) => <option key={s.code} value={s.code}>{s.code} {s.name}</option>)}
       </select>
-      <select name="kind" defaultValue={doc.kind} className={`${fieldClass} h-8 w-auto text-xs`} aria-label="Document type">
+      <select name="kind" defaultValue={doc.kind} className={`${fieldClass} h-8 text-[13px]`} aria-label="Document type">
         <option value="quotation">Quote</option>
         <option value="questionnaire">Questionnaire</option>
         <option value="certificate">Certificate or evidence</option>
         <option value="rfx_pack">Our enquiry document</option>
         <option value="other">Other</option>
       </select>
-      <select name="status" defaultValue={doc.status} className={`${fieldClass} h-8 w-auto text-xs`} aria-label="Read status">
+      <select name="status" defaultValue={doc.status} className={`${fieldClass} h-8 text-[13px]`} aria-label="Read status">
         <option value="unread">Unread</option>
         <option value="read">Read</option>
       </select>
-      <FormMessage state={state.error ? state : undefined} />
+      <FormMessage state={state} />
     </form>
   );
 }

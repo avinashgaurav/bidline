@@ -1,161 +1,322 @@
 import Link from "next/link";
-import { ArrowRight, ChevronRight } from "lucide-react";
+import { AlertCircle, ArrowRight, ArrowUpRight, CheckCircle2, ChevronRight, Scale, TrendingDown, Users } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { appUrlFromHeaders } from "@/lib/app-url";
-import { listRfxs } from "@/lib/rfx";
-import { listEvents, versionOf } from "@/lib/events";
-import { StartChoice } from "@/components/start-choice";
-import { NewEventButton } from "@/components/new-event-button";
+import { listRfxs, type RfxListRow } from "@/lib/rfx";
+import { listAudit } from "@/lib/audit";
+import { awaitingMyApproval } from "@/lib/notifications";
+import { myQueue, todos } from "@/lib/work";
+import { todoStates } from "@/lib/todo-state";
+import { HomeTabs } from "@/components/home-tabs";
+import { ApprovalsBanner } from "@/components/approvals-banner";
+import { savingsOpportunities } from "@/lib/opportunities";
+import { can } from "@/lib/roles";
+import { STAGE, STAGE_ORDER, inView } from "@/lib/stages";
+import { actorOf } from "@/lib/audit-format";
+import { inrShort } from "@/lib/view";
+import { CountUp } from "@/components/count-up";
+import { Ago } from "@/components/ago";
 import { PromptList } from "@/components/prompt-list";
-import { LiveRefresh } from "@/components/live-refresh";
-import { ActivityList } from "@/components/activity-list";
-import { Onboarding } from "@/components/onboarding";
 import { ClaudeMark } from "@/components/claude-mark";
-import { Tip } from "@/components/tip";
+import { InfoTip, Tip } from "@/components/tip";
 
 export const maxDuration = 60;
-
-export const metadata = { title: "Sourcing events · Bidline" };
-
-const STATUS: Record<string, { cls: string; help: string }> = {
-  draft: { cls: "bg-muted text-ink-secondary", help: "Being set up. Not sent to suppliers yet." },
-  issued: { cls: "bg-secondary text-primary", help: "Sent to suppliers. Waiting for quotes." },
-  evaluating: { cls: "bg-warning/10 text-warning", help: "Quotes are in and being compared." },
-  awarded: { cls: "bg-success/10 text-success", help: "Award approved." },
-  closed: { cls: "bg-muted text-ink-secondary", help: "Finished. Kept for the record." },
-};
+export const metadata = { title: "Home · Bidline" };
 
 const HOME_PROMPTS = [
   "In Bidline, read every unread supplier document on my latest sourcing event and submit the quotes.",
-  "Using only Bidline's figures, which qualified supplier should we award each line to, and why?",
-  "In Bidline, what does each supplier still owe me? Draft the follow-ups.",
+  "What is waiting across all my sourcing events in Bidline?",
+  "Using only Bidline's figures, which qualified supplier should win each line, and why?",
 ];
 
-export default async function Dashboard() {
-  const user = await requireUser();
-  const [rfxs, base, events, version] = await Promise.all([
-    listRfxs(user.id), appUrlFromHeaders(), listEvents({ userId: user.id, limit: 8 }), versionOf({ userId: user.id }),
-  ]);
-  const connector = `${base}/mcp/${user.mcp_token}`;
-  const connected = Boolean(user.last_mcp_at);
-  const onboarding = <Onboarding connected={connected} connectorUrl={connector} />;
+function greeting() {
+  const h = Number(new Date().toLocaleString("en-IN", { hour: "numeric", hour12: false, timeZone: "Asia/Kolkata" }));
+  return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+}
 
-  if (!rfxs.length) {
+export default async function Home() {
+  const user = await requireUser();
+  const [all, audit, approvals] = await Promise.all([
+    listRfxs(user.id), listAudit(user.id, { limit: 8 }, { all: can(user.role, "audit_all") }), awaitingMyApproval(user.id),
+  ]);
+  const savings = await savingsOpportunities(user.id, all);
+  const events = all.filter((e) => !e.archived_at);
+  const first = user.name.split(" ")[0];
+  const canEdit = can(user.role, "edit");
+  const connected = Boolean(user.last_mcp_at);
+
+  if (!events.length) {
     return (
-      <div className="mx-auto grid max-w-[760px] gap-6 pt-2 sm:pt-6">
-        {onboarding}
-        <div>
-          <h1 className="text-[28px] leading-tight">Welcome to Bidline, {user.name.split(" ")[0]}</h1>
-          <p className="mt-1.5 max-w-[62ch] text-[15px] text-ink-secondary">
-            Compare supplier quotes like for like, trace every price to the supplier&apos;s own words, chase what is missing and get the award approved.
-            Your Claude does the reading; Bidline does the calculations.
+      <div className="mx-auto grid max-w-[880px] gap-6 pt-6 sm:pt-12">
+        <div className="rise">
+          <p className="text-[13px] text-ink-secondary">{user.workspace_name}</p>
+          <h1 className="mt-1 text-[32px] leading-[1.1] tracking-[-0.01em] text-balance sm:text-[40px]">{greeting()}, {first}. Let&apos;s run your first sourcing event.</h1>
+          <p className="mt-3 max-w-[60ch] text-[16px] text-ink-secondary">
+            Suppliers send quotes as spreadsheets, PDFs, emails and photos. Your Claude reads them; Bidline puts every price side by side, like for like, and takes the award to approval.
           </p>
         </div>
-        <section className="rounded-2xl bg-card p-5 ring-1 ring-border sm:p-7">
-          <StartChoice />
-        </section>
-        <div className="justify-self-start">
-          <LiveRefresh url="/api/rfx/all/version" initial={version} />
+        <ol className="grid gap-3 sm:grid-cols-3">
+          {[
+            ["Add the purchase", "Line items, suppliers and the questions they must answer."],
+            ["Claude reads the quotes", "Every price lands in one comparison, linked to its source."],
+            ["Award and approve", "Pick the winners and send the award note to your approver."],
+          ].map(([t, d], i) => (
+            <li key={t} className="rise rounded-xl bg-card p-4 ring-1 ring-border" style={{ animationDelay: `${120 + i * 80}ms` }}>
+              <span className="num grid size-7 place-items-center rounded-full bg-secondary text-[13px] text-primary">{i + 1}</span>
+              <p className="mt-3 text-[15px] font-medium">{t}</p>
+              <p className="mt-1 text-[13.5px] text-ink-secondary">{d}</p>
+            </li>
+          ))}
+        </ol>
+        <div className="rise flex flex-wrap items-center gap-3" style={{ animationDelay: "380ms" }}>
+          {canEdit ? (
+            <Link href="/?new=1" className="inline-flex h-11 items-center gap-2 rounded-lg bg-primary px-5 text-[15px] text-white hover:bg-primary/90">Start a sourcing event <ArrowRight className="size-4" /></Link>
+          ) : (
+            <p className="text-[14px] text-ink-secondary">You have view-only access. Sourcing events your team creates will appear here.</p>
+          )}
+          <Link href="/docs" className="text-[14px] text-ink-secondary hover:text-primary">How Bidline works</Link>
         </div>
       </div>
     );
   }
 
-  const unread = rfxs.reduce((a, r) => a + (r.unread_docs ?? 0), 0);
-  const awaiting = rfxs.filter((r) => r.award_status === "sent").length;
-  const open = rfxs.filter((r) => !["awarded", "closed"].includes(r.status)).length;
+  const open = events.filter((e) => !["awarded", "closed"].includes(e.status));
+  const attention = events.filter((e) => inView(e, "attention"));
+  const awaiting = events.filter((e) => e.award_status === "sent");
+  const awaitingValue = awaiting.reduce((a, e) => a + (e.award_total_inr ?? 0), 0);
+  const planned = open.reduce((a, e) => a + e.budget_inr, 0);
+  const approved = events.filter((e) => e.award_status === "approved" && e.award_total_inr !== null);
+  const savedOnAwards = approved.reduce((a, e) => a + ((e.award_baseline_inr ?? 0) - (e.award_total_inr ?? 0)), 0);
+  const hasBaseline = approved.some((e) => (e.award_baseline_inr ?? 0) > 0);
+  const list = todos(events, approvals, canEdit);
+  const states = await todoStates(user.workspace_id);
+  const mine = myQueue(todos(events, [], canEdit), user.id, states, Number(new Date()));
+  const recent = [...events].sort((a, b) => +new Date(b.last_activity ?? b.updated_at) - +new Date(a.last_activity ?? a.updated_at)).slice(0, 7);
 
   return (
     <div className="grid gap-5">
-      {onboarding}
-      <header className="flex flex-wrap items-end justify-between gap-3">
+      <header className="rise flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-[24px] leading-tight">Sourcing events</h1>
+          <p className="text-[13px] text-ink-secondary">{user.workspace_name} · {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Kolkata" })}</p>
+          <h1 className="mt-0.5 text-[28px] leading-tight tracking-[-0.01em]">{greeting()}, {first}</h1>
           <p className="mt-1 text-[14px] text-ink-secondary">
-            {open} open · {unread ? <Link href={`/rfx/${rfxs.find((r) => r.unread_docs)?.id}?tab=documents`} className="text-warning hover:underline">{unread} unread document{unread === 1 ? "" : "s"}</Link> : "no unread documents"}
-            {awaiting ? <> · {awaiting} award{awaiting === 1 ? "" : "s"} awaiting approval</> : null}
+            {list.length ? <>{list.length} thing{list.length === 1 ? "" : "s"} need{list.length === 1 ? "s" : ""} attention across {open.length} open event{open.length === 1 ? "" : "s"}.</> : <>Nothing is waiting on anyone. {open.length} open event{open.length === 1 ? "" : "s"}.</>}
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <LiveRefresh url="/api/rfx/all/version" initial={version} />
-          <NewEventButton />
         </div>
       </header>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="h-fit overflow-hidden rounded-xl bg-card ring-1 ring-border">
-          <div className="hidden grid-cols-[minmax(0,1fr)_120px_170px_120px_20px] gap-4 border-b border-border bg-[var(--grid-head)] px-4 py-2.5 text-xs text-ink-secondary md:grid">
-            <span>Event</span><span>Status</span><span>Quotes in</span><span>Due</span><span />
-          </div>
-          <ul>
-            {rfxs.map((r) => {
-              const st = STATUS[r.status] ?? STATUS.draft;
-              const pct = r.supplier_count ? Math.round((r.responded / r.supplier_count) * 100) : 0;
-              return (
-                <li key={r.id} className="border-b border-border last:border-0">
-                  <Link href={`/rfx/${r.id}`} className="group grid gap-x-4 gap-y-2 px-4 py-3.5 transition-colors hover:bg-muted/50 md:grid-cols-[minmax(0,1fr)_120px_170px_120px_20px] md:items-center">
-                    <span className="min-w-0">
-                      <span className="flex items-center gap-2 text-[12px] whitespace-nowrap text-ink-secondary">
-                        <span className="rounded bg-night px-1.5 py-px text-[10px] font-medium tracking-wide text-on-dark">{r.event_type}</span>
-                        <span className="num">{r.code}</span>
-                        {r.created_via === "demo" ? <span className="rounded-full bg-lavender px-1.5 text-[11px] text-primary">Demo</span> : null}
-                        {r.created_via === "claude" ? <Tip text="Created in Claude over MCP"><span tabIndex={0} aria-label="Created in Claude" className="inline-flex"><ClaudeMark className="size-3" /></span></Tip> : null}
+      <HomeTabs active="overview" workCount={mine.active.length + approvals.length} />
+      <ApprovalsBanner items={approvals.map((a) => ({ rfxId: a.rfx_id, code: a.code, title: a.title, totalInr: a.total_inr, since: a.created_at }))} />
+
+      <section aria-label="Key figures" className="rise grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border ring-1 ring-border lg:grid-cols-5" style={{ animationDelay: "60ms" }}>
+        <Stat label="Open events" help="Sourcing events not yet awarded or closed." value={<CountUp value={open.length} />} sub={`${events.length} in total`} href="/events" />
+        <Stat label="Need attention" help="Unread documents, prices to check, overdue follow-ups or an award awaiting approval." value={<CountUp value={attention.length} />} sub={attention.length ? "Open the list" : "All clear"} warn={attention.length > 0} href="/events?view=attention" />
+        <Stat label="Awaiting approval" help="Total value of awards sent to an approver and not yet decided." value={<CountUp value={awaitingValue} format="inr" />} sub={`${awaiting.length} award${awaiting.length === 1 ? "" : "s"}`} href="/events?view=approval" />
+        <Stat label="Planned spend" help="Budget across open events: quantity times the budget unit price you set on each line. Lines without a budget are not counted." value={<CountUp value={planned} format="inr" />} sub={planned ? "Budget on open events" : "No budgets set yet"} href="/analytics" />
+        <Stat label="Saved against budget" help="On approved awards: budget for the awarded lines minus the awarded total." value={hasBaseline ? <CountUp value={savedOnAwards} format="inr" /> : "n/a"} sub={hasBaseline ? `${approved.length} approved award${approved.length === 1 ? "" : "s"}` : "Shows once an award is approved"} href="/analytics" className="col-span-2 lg:col-span-1" />
+      </section>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="grid min-w-0 content-start gap-5">
+          <Pipeline events={events} />
+
+          <Savings data={savings} />
+
+          <section className="rise overflow-hidden rounded-xl bg-card ring-1 ring-border" style={{ animationDelay: "160ms" }}>
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <h2 className="text-[15px] font-medium">Needs attention</h2>
+              {list.length > 6 ? <Link href="/events?view=attention" className="text-[13px] text-primary hover:underline">All {list.length}</Link> : null}
+            </div>
+            {list.length ? (
+              <ul>
+                {list.slice(0, 6).map((t) => (
+                  <li key={t.key} className="border-b border-border last:border-0">
+                    <Link href={t.href} className="group flex items-center gap-3 px-4 py-2.5 hover:bg-muted/50">
+                      <span className={`grid size-8 shrink-0 place-items-center rounded-lg ${t.tone === "warn" ? "bg-warning/10 text-warning" : t.tone === "go" ? "bg-success/10 text-success" : "bg-secondary text-primary"}`}><t.icon className="size-4" /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[14px]">{t.text}</span>
+                        <span className="block truncate text-[12px] text-ink-secondary"><span className="num">{t.rfx.code}</span> · {t.rfx.title}</span>
                       </span>
-                      <span className="mt-0.5 block truncate text-[15px] font-medium group-hover:text-primary">{r.title}</span>
-                      <span className="text-[12px] text-ink-secondary">
-                        {r.line_count} line items
-                        {r.unread_docs ? <span className="text-warning"> · {r.unread_docs} unread</span> : null}
-                        {r.award_status === "sent" ? <span className="text-primary"> · awaiting approval</span> : null}
+                      <span className="hidden shrink-0 items-center gap-1 text-[13px] text-primary opacity-80 group-hover:opacity-100 sm:inline-flex">{t.action} <ChevronRight className="size-3.5" /></span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="flex items-center gap-2 px-4 py-5 text-[14px] text-ink-secondary"><CheckCircle2 className="size-4 text-success" /> Nothing is waiting on you right now.</p>
+            )}
+          </section>
+
+          <section className="rise overflow-hidden rounded-xl bg-card ring-1 ring-border" style={{ animationDelay: "220ms" }}>
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <h2 className="text-[15px] font-medium">Recently active</h2>
+              <Link href="/events" className="inline-flex items-center gap-1 text-[13px] text-primary hover:underline">All sourcing events <ArrowRight className="size-3.5" /></Link>
+            </div>
+            <div className="hidden grid-cols-[minmax(0,1fr)_130px_150px_96px] gap-4 border-b border-border bg-[var(--grid-head)] px-4 py-2 text-[12px] text-ink-secondary md:grid">
+              <span>Event</span><span>Stage</span><span>Quotes in</span><span>Due</span>
+            </div>
+            <ul>
+              {recent.map((r) => {
+                const st = STAGE[r.status] ?? STAGE.draft;
+                const pct = r.supplier_count ? Math.round((r.responded / r.supplier_count) * 100) : 0;
+                return (
+                  <li key={r.id} className="border-b border-border last:border-0">
+                    <Link href={`/rfx/${r.id}`} className="group grid gap-x-4 gap-y-1.5 px-4 py-2.5 hover:bg-muted/50 md:grid-cols-[minmax(0,1fr)_130px_150px_96px] md:items-center">
+                      <span className="min-w-0">
+                        <span className="block truncate text-[14px] font-medium group-hover:text-primary">{r.title}</span>
+                        <span className="block truncate text-[12px] text-ink-secondary"><span className="num">{r.code}</span> · {r.line_count} items · {r.owner_name ?? "Unknown"}</span>
                       </span>
-                    </span>
-                    <span>
-                      <Tip text={st.help}><span tabIndex={0} className={`rounded-full px-2 py-0.5 text-xs capitalize ${st.cls}`}>{r.status}</span></Tip>
-                    </span>
-                    <span className="grid gap-1">
-                      <span className="num text-[13px]">{r.responded} of {r.supplier_count} suppliers</span>
-                      <span className="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
-                        <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+                      <span><Tip text={st.help}><span tabIndex={0} className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] ${st.chip}`}><span className={`size-1.5 rounded-full ${st.dot}`} />{st.label}</span></Tip></span>
+                      <span className="grid gap-1">
+                        <span className="num text-[12.5px]">{r.responded} of {r.supplier_count}</span>
+                        <span className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden><span className="grow-x block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} /></span>
                       </span>
-                    </span>
-                    <span className="num text-[13px] text-ink-secondary">{r.due_at ? new Date(r.due_at).toLocaleDateString("en-IN", { dateStyle: "medium" }) : "No due date"}</span>
-                    <ChevronRight className="hidden size-4 text-ink-secondary group-hover:text-primary md:block" />
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+                      <span className="num text-[12.5px] text-ink-secondary">{r.due_at ? new Date(r.due_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "No date"}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
         </div>
 
-        <aside className="grid content-start gap-4">
-          <Link href="/connect" className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm ring-1 transition-colors ${connected ? "bg-card ring-border hover:ring-primary/40" : "bg-warning/10 ring-warning/30"}`}>
-            <span className="relative grid size-8 place-items-center rounded-lg bg-[#F6EEE8]">
-              <ClaudeMark className="size-4" />
-              <span className={`absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-card ${connected ? "bg-[#3fbf7f]" : "bg-[#f0a43c]"}`} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block font-medium">{connected ? "Claude is connected" : "Connect Claude"}</span>
-              <span className="block truncate text-xs text-ink-secondary">
-                {connected ? `Last used ${new Date(user.last_mcp_at!).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}` : "Needed to read supplier quotes"}
+        <aside className="grid content-start gap-5">
+          {!connected ? (
+            <Link href="/connect" className="rise flex items-start gap-3 rounded-xl bg-night p-4 text-on-dark hover:bg-night-raised" style={{ animationDelay: "120ms" }}>
+              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#F6EEE8]"><ClaudeMark className="size-5" /></span>
+              <span className="min-w-0">
+                <span className="block text-[14px] font-medium">Connect Claude to read quotes</span>
+                <span className="mt-0.5 block text-[13px] text-fog">Bidline has no AI of its own. Your Claude reads supplier files and sends the prices here. One minute to set up.</span>
+                <span className="mt-2 inline-flex items-center gap-1 text-[13px] text-white">Connect now <ArrowUpRight className="size-3.5" /></span>
               </span>
-            </span>
-            <ChevronRight className="size-4 text-ink-secondary" />
-          </Link>
+            </Link>
+          ) : null}
 
-          <section className="rounded-xl bg-card p-4 ring-1 ring-border">
+          <section className="rise rounded-xl bg-card p-4 ring-1 ring-border" style={{ animationDelay: "180ms" }}>
             <div className="flex items-baseline justify-between gap-2">
-              <h2 className="text-[16px] font-medium">Ask Claude</h2>
-              <Link href="/ask" className="inline-flex items-center gap-1 text-[13px] text-primary hover:underline">More <ArrowRight className="size-3.5" /></Link>
+              <h2 className="flex items-center gap-2 text-[15px] font-medium"><ClaudeMark className="size-4" /> Ask Claude</h2>
+              <Link href="/ask" className="text-[13px] text-primary hover:underline">More examples</Link>
             </div>
-            <p className="mt-0.5 mb-3 text-[13px] text-ink-secondary">Examples to start with. Ask anything else in your own words.</p>
+            <p className="mt-0.5 mb-3 text-[13px] text-ink-secondary">Copy one into a Claude chat with Bidline switched on, or ask in your own words.</p>
             <PromptList prompts={HOME_PROMPTS} />
           </section>
 
-          <section className="rounded-xl bg-card p-4 ring-1 ring-border">
-            <h2 className="mb-3 text-[16px] font-medium">Recent activity</h2>
-            <ActivityList events={events} compact />
+          <section className="rise rounded-xl bg-card ring-1 ring-border" style={{ animationDelay: "240ms" }}>
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <h2 className="text-[15px] font-medium">Latest activity</h2>
+              <Link href="/audit" className="text-[13px] text-primary hover:underline">Audit log</Link>
+            </div>
+            <ol className="grid">
+              {audit.map((e) => {
+                const who = actorOf(e.actor, e.user_name, e.detail);
+                return (
+                  <li key={e.id} className="flex gap-3 border-b border-border px-4 py-2.5 last:border-0">
+                    <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-muted">
+                      {e.actor === "claude" ? <ClaudeMark className="size-3" /> : <span className={`size-2 rounded-full ${e.actor === "approver" ? "bg-success" : "bg-primary"}`} />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="line-clamp-2 text-[13px] leading-snug">{e.summary}</span>
+                      <span className="mt-0.5 block text-[11.5px] text-ink-secondary">{who.name}{e.rfx_code ? <> · <span className="num">{e.rfx_code}</span></> : null} · <Ago iso={e.created_at} /></span>
+                    </span>
+                  </li>
+                );
+              })}
+              {!audit.length ? <li className="px-4 py-5 text-[13px] text-ink-secondary">No activity yet.</li> : null}
+            </ol>
           </section>
         </aside>
       </div>
     </div>
+  );
+}
+
+function Stat({ label, help, value, sub, warn = false, href, className = "" }: {
+  label: string; help: string; value: React.ReactNode; sub: string; warn?: boolean; href: string; className?: string;
+}) {
+  return (
+    <Link href={href} className={`group block bg-card px-4 py-3.5 transition-colors hover:bg-muted/40 ${className}`}>
+      <span className="flex items-center gap-1.5 text-[12px] text-ink-secondary">{label}<InfoTip text={help} label={`About ${label}`} /></span>
+      <span className={`num mt-1 block text-[24px] leading-tight tracking-[-0.01em] ${warn ? "text-warning" : ""}`}>{value}</span>
+      <span className="mt-0.5 flex items-center gap-1 text-[12px] text-ink-secondary">{sub}<ArrowRight className="size-3 opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100" /></span>
+    </Link>
+  );
+}
+
+/** Events by stage as one bar: how the work is spread across the pipeline. */
+function Pipeline({ events }: { events: RfxListRow[] }) {
+  const counts = STAGE_ORDER.map((k) => ({ k, n: events.filter((e) => e.status === k).length })).filter((x) => x.n);
+  const total = counts.reduce((a, x) => a + x.n, 0) || 1;
+  return (
+    <section className="rise rounded-xl bg-card p-4 ring-1 ring-border" style={{ animationDelay: "100ms" }}>
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-[15px] font-medium">Pipeline</h2>
+        <span className="text-[12px] text-ink-secondary">{events.length} event{events.length === 1 ? "" : "s"} by stage</span>
+      </div>
+      <div className="mt-3 flex h-2.5 gap-[2px] overflow-hidden rounded-full" role="img" aria-label={counts.map((c) => `${STAGE[c.k].label}: ${c.n}`).join(", ")}>
+        {counts.map((c, i) => (
+          <span key={c.k} className={`grow-x h-full ${STAGE[c.k].dot}`} style={{ width: `${(c.n / total) * 100}%`, animationDelay: `${150 + i * 90}ms` }} />
+        ))}
+      </div>
+      <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
+        {STAGE_ORDER.map((k) => {
+          const n = events.filter((e) => e.status === k).length;
+          return (
+            <li key={k}>
+              <Tip text={STAGE[k].help}>
+                <Link href={`/events?view=${k}`} className={`inline-flex items-center gap-2 text-[13px] ${n ? "" : "opacity-50"} hover:text-primary`}>
+                  <span className={`size-2 rounded-full ${STAGE[k].dot}`} />{STAGE[k].label}<span className="num text-ink-secondary">{n}</span>
+                </Link>
+              </Tip>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+const OPP_ICON = { under_budget: TrendingDown, single_quote: Users, unusual: AlertCircle, qualify_cost: Scale } as const;
+
+/** Ways to save across open events, with how much of what was found is already captured in approved awards. */
+function Savings({ data }: { data: Awaited<ReturnType<typeof savingsOpportunities>> }) {
+  if (!data.items.length && !data.captured) return null;
+  return (
+    <section className="rise overflow-hidden rounded-xl bg-card ring-1 ring-border" style={{ animationDelay: "130ms" }}>
+      <div className="grid gap-3 border-b border-border px-4 py-3 sm:grid-cols-[minmax(0,1fr)_260px] sm:items-center">
+        <div>
+          <h2 className="flex items-center gap-1.5 text-[15px] font-medium">Ways to save<InfoTip label="About ways to save" text="Found by Bidline's own comparison on open events: lowest quotes under your budget, lines with only one quote, unusually high winning prices, and what qualification costs. No AI estimates." /></h2>
+          <p className="text-[12.5px] text-ink-secondary">From the latest quotes on {data.checked} open event{data.checked === 1 ? "" : "s"}.</p>
+        </div>
+        <div>
+          <div className="flex items-baseline justify-between text-[12.5px]">
+            <span className="text-ink-secondary">Captured in approved awards</span>
+            <span className="num font-medium">{data.pct}%</span>
+          </div>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="img" aria-label={`${data.pct}% of savings found are captured`}>
+            <span className="grow-x block h-full rounded-full bg-success" style={{ width: `${data.pct}%` }} />
+          </div>
+          <p className="num mt-1 text-[11.5px] text-ink-secondary">{inrShort(data.captured)} of {inrShort(data.identified)} found</p>
+        </div>
+      </div>
+      {data.items.length ? (
+        <ul>
+          {data.items.map((o) => {
+            const Icon = OPP_ICON[o.kind];
+            return (
+              <li key={`${o.rfxId}-${o.kind}`} className="border-b border-border last:border-0">
+                <Link href={o.href} className="group flex items-center gap-3 px-4 py-2.5 hover:bg-muted/50">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-success/10 text-success"><Icon className="size-4" /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14px]">{o.text}</span>
+                    <span className="block truncate text-[12px] text-ink-secondary"><span className="num">{o.code}</span> · {o.title}</span>
+                  </span>
+                  <span className="num shrink-0 text-right text-[14px] font-medium">{inrShort(o.inr)}<span className="block text-[11px] font-normal text-ink-secondary">{o.kind === "under_budget" ? "under budget" : o.kind === "qualify_cost" ? "extra cost" : "at stake"}</span></span>
+                  <span className="hidden shrink-0 items-center gap-1 text-[13px] text-primary sm:inline-flex">{o.action}<ChevronRight className="size-3.5" /></span>
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      ) : <p className="px-4 py-4 text-[13.5px] text-ink-secondary">Nothing new found on open events.</p>}
+    </section>
   );
 }

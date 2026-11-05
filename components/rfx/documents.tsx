@@ -1,54 +1,18 @@
-import { ExternalLink, FileSpreadsheet, FileText, Image as ImageIcon, Mail } from "lucide-react";
 import type { Comparison } from "@/lib/comparison";
-import { DocumentRowForm, Uploader } from "./documents-client";
+import { DocumentsBoard } from "./documents-board";
 
-const ICON = (mime: string) =>
-  mime.startsWith("image/") ? ImageIcon : /sheet|excel|csv|tab-separated|opendocument.spreadsheet/.test(mime) ? FileSpreadsheet : /rfc822/.test(mime) ? Mail : FileText;
-
-export function DocumentsTab({ cmp }: { cmp: Comparison }) {
-  const suppliers = cmp.suppliers.map((s) => ({ code: s.code, name: s.name }));
+/** Supplier files for one event, grouped by supplier so it stays readable at 5 or 50 files. */
+export function DocumentsTab({ cmp, canEdit }: { cmp: Comparison; canEdit: boolean }) {
   return (
-    <div className="grid gap-4">
-      <Uploader rfxId={cmp.rfx.id} suppliers={suppliers} />
-      <div className="overflow-x-auto rounded-xl bg-card ring-1 ring-border">
-        <table className="w-full text-sm">
-          <thead className="bg-[var(--grid-head)] text-left text-xs text-ink-secondary">
-            <tr><th className="px-4 py-3 font-medium">File</th><th className="px-4 py-3 font-medium">Supplier, type, status</th><th className="px-4 py-3 font-medium">Added</th></tr>
-          </thead>
-          <tbody>
-            {cmp.documents.map((d) => {
-              const Icon = ICON(d.mime_type);
-              return (
-                <tr key={d.id} className="border-t border-border align-middle">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <Icon className="size-4 shrink-0 text-ink-secondary" />
-                      <div className="min-w-0">
-                        <a href={`/api/files/${d.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-primary hover:underline">
-                          <span className="truncate">{d.filename}</span><ExternalLink className="size-3" />
-                        </a>
-                        <p className="text-xs text-ink-secondary">
-                          {Math.round(d.byte_size / 1024)} KB · <code>{d.id}</code>
-                          {d.status === "read" && d.read_at ? ` · read ${new Date(d.read_at).toLocaleDateString("en-IN", { dateStyle: "medium" })}` : ""}
-                        </p>
-                      </div>
-                      {d.status === "unread" ? <span className="ml-auto rounded-full bg-warning/10 px-2 py-0.5 text-xs text-warning">Unread</span> : null}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3"><DocumentRowForm rfxId={cmp.rfx.id} doc={d} suppliers={suppliers} /></td>
-                  <td className="px-4 py-3 text-xs text-ink-secondary">
-                    {new Date(d.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
-                    <span className="block">{d.source === "claude" ? "Saved by Claude" : d.source === "seed" ? "Demo file" : "Uploaded"}</span>
-                  </td>
-                </tr>
-              );
-            })}
-            {!cmp.documents.length ? (
-              <tr><td colSpan={3} className="px-4 py-8 text-center text-ink-secondary">No documents yet. Upload supplier quotes above, or attach them in a Claude chat.</td></tr>
-            ) : null}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <DocumentsBoard
+      rfxId={cmp.rfx.id}
+      code={cmp.rfx.code}
+      canEdit={canEdit}
+      suppliers={cmp.suppliers.map((s) => ({ id: s.id, code: s.code, name: s.name, status: s.status }))}
+      docs={cmp.documents.map((d) => ({
+        id: d.id, supplier_id: d.supplier_id, supplier_code: d.supplier_code, kind: d.kind, filename: d.filename, mime_type: d.mime_type,
+        byte_size: d.byte_size, source: d.source, status: d.status, read_at: d.read_at, created_at: d.created_at,
+      }))}
+    />
   );
 }

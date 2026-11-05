@@ -14,6 +14,12 @@ import type { RawQuote } from "./calc/normalise";
 import type { ReadAnswer } from "./calc/questionnaire";
 import { buildAwardSnapshot, awardMarkdown, type ScenarioKey } from "./award";
 import { getEmailAccount, sendMail } from "./mail";
+import { can, deniedMessage, type Perm } from "./roles";
+import { awardForToken, createSteps, decideStep } from "./approvals";
+import { getSettings, overLimit } from "./workspace";
+import { approversOf, notify } from "./notify";
+import { expireStaleAwards } from "./expiry";
+import { announce } from "./channels";
 
 /** Who is acting, and on whose behalf. Every action is logged with this. */
 export interface ActionCtx {
@@ -21,6 +27,21 @@ export interface ActionCtx {
   actor: Actor;
   tool?: string;
   userRequest?: string | null;
+}
+
+/** The event, if this person may do `perm` on it. Every mutation starts here. */
+async function rfxFor(ctx: ActionCtx, ref: string | null | undefined, perm: Perm = "edit"): Promise<RfxRow & { my_role: string }> {
+  const rfx = await resolveRfx(ctx.userId, ref);
+  if (!can(rfx.my_role, perm)) throw new BadInput(deniedMessage(rfx.my_role, perm));
+  return rfx;
+}
+
+/** The person's role in their workspace, if it allows `perm`. For actions not tied to one event. */
+export async function requireWorkspacePerm(userId: string, perm: Perm): Promise<string> {
+  const row = await one<{ role: string }>(
+    "select m.role from users u join workspace_members m on m.workspace_id = u.workspace_id and m.user_id = u.id where u.id = $1", [userId]);
+  if (!can(row?.role, perm)) throw new BadInput(deniedMessage(row?.role, perm));
+  return row!.role;
 }
 
 async function log(ctx: ActionCtx, rfxId: string | null, kind: string, summary: string, detail: Record<string, unknown> = {}) {
@@ -39,6 +60,7 @@ export async function createRfxAction(ctx: ActionCtx, input: {
   termsAsked?: Record<string, unknown>; notes?: string | null; lines: LineInput[]; questions?: QuestionInput[];
   suppliers?: SupplierInput[];
 }) {
+  await requireWorkspacePerm(ctx.userId, "edit");
   const approver = (input.approver ?? {}) as { name?: string | null; email?: string | null };
   if (!approver.name) {
     const me = await one<{ default_approver_name: string | null; default_approver_email: string | null }>(
@@ -61,9 +83,11 @@ export async function updateRfxAction(ctx: ActionCtx, rfxRef: string | null | un
   title?: string; eventType?: string; dueDate?: string | null; status?: string; notes?: string | null;
   buyer?: Record<string, unknown>; approver?: Record<string, unknown>; termsAsked?: Record<string, unknown>;
 }) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   const allowed = ["draft", "issued", "evaluating", "awarded", "closed"];
   if (patch.status && !allowed.includes(patch.status)) throw new BadInput(`Status must be one of ${allowed.join(", ")}.`);
+  // "Awarded" comes only from an approved award, never from an edit.
+  if (patch.status === "awarded" && rfx.status !== "awarded") throw new BadInput("An event becomes awarded when its award is approved. Draft the award and send it for approval.");
   const eventType = patch.eventType?.toUpperCase();
   if (eventType && !["RFQ", "RFP", "RFI", "TENDER"].includes(eventType)) throw new BadInput("Event type must be RFQ, RFP, RFI or TENDER.");
   if (eventType) await q(`update rfx set event_type = $2 where id = $1`, [rfx.id, eventType]);
@@ -97,7 +121,7 @@ function pick(rfx: RfxRow, keys: string[]) {
 }
 
 export async function upsertLinesAction(ctx: ActionCtx, rfxRef: string | null | undefined, lines: LineInput[]) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   const before = await getLines(rfx.id);
   const touched = await upsertLines(rfx.id, lines);
   const after = await getLines(rfx.id);
@@ -141,7 +165,7 @@ export async function upsertLinesAction(ctx: ActionCtx, rfxRef: string | null | 
 }
 
 export async function removeLinesAction(ctx: ActionCtx, rfxRef: string | null | undefined, nos: number[], reason: string) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   await removeLines(rfx.id, nos);
   await q(`delete from line_notes where rfx_id = $1 and line_no = any($2::int[])`, [rfx.id, nos]);
   await log(ctx, rfx.id, "lines_removed", `Removed line${nos.length === 1 ? "" : "s"} ${nos.join(", ")} from ${rfx.code}.`, { reason });
@@ -149,7 +173,7 @@ export async function removeLinesAction(ctx: ActionCtx, rfxRef: string | null | 
 }
 
 export async function addQuestionsAction(ctx: ActionCtx, rfxRef: string | null | undefined, qs: QuestionInput[]) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   await upsertQuestions(rfx.id, qs);
   await log(ctx, rfx.id, "questions_changed", `Added or changed ${qs.length} questionnaire question${qs.length === 1 ? "" : "s"} on ${rfx.code}.`);
   return { rfx };
@@ -161,7 +185,7 @@ export async function addQuestionsAction(ctx: ActionCtx, rfxRef: string | null |
  * override is on the record instead of being worked around silently.
  */
 export async function issueRfxAction(ctx: ActionCtx, rfxRef: string | null | undefined, overrideReason?: string | null) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   const gate = qualityGate(await getLines(rfx.id));
   if (gate.length && !overrideReason?.trim()) {
     return { issued: false, rfx, gate };
@@ -175,7 +199,7 @@ export async function issueRfxAction(ctx: ActionCtx, rfxRef: string | null | und
   await log(ctx, rfx.id, "rfx_issued",
     `Issued ${rfx.code} to its suppliers${gate.length ? `, overriding ${gate.length} quality warning${gate.length === 1 ? "" : "s"}: "${overrideReason}"` : ""}. Delivery is recorded, not sent.`,
     { gate });
-  return { issued: true, rfx: await resolveRfx(ctx.userId, rfx.id), gate };
+  return { issued: true, rfx: await rfxFor(ctx, rfx.id), gate };
 }
 
 // ---------------------------------------------------------------------------
@@ -183,7 +207,7 @@ export async function issueRfxAction(ctx: ActionCtx, rfxRef: string | null | und
 // ---------------------------------------------------------------------------
 
 export async function addSuppliersAction(ctx: ActionCtx, rfxRef: string | null | undefined, list: SupplierInput[]) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   const added: SupplierRow[] = [];
   for (const s of list) added.push(await addSupplier(rfx.id, s));
   await log(ctx, rfx.id, "suppliers_added", `Added ${added.map((s) => `${s.code} ${s.name}`).join(", ")} to ${rfx.code}.`);
@@ -194,7 +218,7 @@ export async function updateSupplierAction(ctx: ActionCtx, rfxRef: string | null
   name?: string; city?: string | null; gstin?: string | null; contactName?: string | null; email?: string | null;
   phone?: string | null; channel?: string | null; status?: string; notes?: string | null;
 }) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   const s = await resolveSupplier(rfx.id, supplierRef);
   const contact = { ...(s.contact ?? {}) } as Record<string, unknown>;
   if (patch.contactName !== undefined) contact.name = patch.contactName;
@@ -219,7 +243,7 @@ export async function updateSupplierAction(ctx: ActionCtx, rfxRef: string | null
 export async function uploadDocumentAction(ctx: ActionCtx, rfxRef: string, file: {
   filename: string; bytes: Buffer; mimeType?: string | null; supplierRef?: string | null; kind?: string | null;
 }) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   const { guessSupplier } = await import("./files");
   const suppliers = await getSuppliers(rfx.id);
   const supplier = file.supplierRef
@@ -238,7 +262,7 @@ export async function uploadDocumentAction(ctx: ActionCtx, rfxRef: string, file:
 export async function saveTextDocumentAction(ctx: ActionCtx, rfxRef: string | null | undefined, input: {
   filename: string; text: string; supplierRef?: string | null; kind?: string | null;
 }) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   const supplier = input.supplierRef ? await resolveSupplier(rfx.id, input.supplierRef).catch(() => null) : null;
   if (!input.text?.trim()) throw new BadInput("There is no text to save.");
   const doc = await storeTextDocument({ rfxId: rfx.id, filename: input.filename, text: input.text, supplierId: supplier?.id ?? null, kind: input.kind });
@@ -249,7 +273,7 @@ export async function saveTextDocumentAction(ctx: ActionCtx, rfxRef: string | nu
 export async function updateDocumentAction(ctx: ActionCtx, rfxRef: string, documentRef: string, patch: {
   supplierRef?: string | null; kind?: string | null; status?: string | null;
 }) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   const doc = await getDocument(rfx.id, documentRef);
   if (!doc) throw new NotFound(`No document '${documentRef}' on ${rfx.code}.`);
   const supplier = patch.supplierRef ? await resolveSupplier(rfx.id, patch.supplierRef) : null;
@@ -272,7 +296,7 @@ export async function submitQuoteAction(ctx: ActionCtx, input: {
   documentId?: string | null;
   extraction: unknown;
 }) {
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   let supplier: SupplierRow;
   try {
     supplier = await resolveSupplier(rfx.id, input.supplier);
@@ -442,7 +466,9 @@ export async function submitQuoteAction(ctx: ActionCtx, input: {
     `${unmapped ? `, ${unmapped} item${unmapped === 1 ? "" : "s"} matching no RFx line` : ""}` +
     `${revision > 1 ? `, revision ${revision}` : ""}` +
     `${issues.length ? `, ${issues.length} row${issues.length === 1 ? "" : "s"} routed to review by the contract checks` : ""}.`,
-    { submissionId, documentId: doc?.id ?? null, issues });
+    { submissionId, documentId: doc?.id ?? null, issues, supplier: supplier.code, filename: doc?.filename ?? null });
+  await announce(rfx.id, "quote_read", `Claude read ${doc ? doc.filename : "a quotation"} from ${supplier.name} on ${rfx.code}: ${cells} priced lines.`);
+  await notify([rfx.user_id], "quote_read", `${supplier.name} quote read on ${rfx.code}`, `Claude read ${doc ? doc.filename : "a quotation"} from ${supplier.name} on ${rfx.code}: ${cells} priced lines stored.`);
 
   const cmp = await loadComparison(rfx);
   return { rfx, supplier: (await resolveSupplier(rfx.id, supplier.id)), submissionId, revision, cells, unmapped, issues, fxNotes, cmp };
@@ -455,7 +481,7 @@ export async function submitQuoteAction(ctx: ActionCtx, input: {
 export async function submitQuestionnaireAction(ctx: ActionCtx, input: {
   rfx?: string | null; supplier: string; documentId?: string | null; answers: ReadAnswer[];
 }) {
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   const supplier = await resolveSupplier(rfx.id, input.supplier);
   if (supplier.status === "removed") throw new BadInput(`${supplier.name} was removed from this event. Restore them on the Suppliers tab first.`);
   const doc = input.documentId ? await getDocument(rfx.id, input.documentId) : null;
@@ -541,7 +567,7 @@ async function closeAnsweredFollowUps(supplierId: string) {
 export async function submitSecondReadAction(ctx: ActionCtx, input: {
   rfx?: string | null; supplier: string; readings: Array<{ lineNo: number; price: number | null }>;
 }) {
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   const supplier = await resolveSupplier(rfx.id, input.supplier);
   if (supplier.status === "removed") throw new BadInput(`${supplier.name} was removed from this event. Restore them on the Suppliers tab first.`);
   const cmp = await loadComparison(rfx);
@@ -573,7 +599,7 @@ export async function correctCellAction(ctx: ActionCtx, input: {
   price?: number | null; uom?: string | null; currency?: string | null; status?: string | null; note?: string | null;
 }) {
   if (!input.reason?.trim()) throw new BadInput("A correction needs a reason. It is shown next to the number and in the award note.");
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   const supplier = await resolveSupplier(rfx.id, input.supplier);
   const lines = await getLines(rfx.id);
   const line = lines.find((l) => l.no === input.lineNo);
@@ -613,7 +639,7 @@ export async function correctCellAction(ctx: ActionCtx, input: {
 }
 
 export async function clearCorrectionAction(ctx: ActionCtx, input: { rfx?: string | null; supplier: string; lineNo: number; reason?: string | null }) {
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   const supplier = await resolveSupplier(rfx.id, input.supplier);
   const rows = await q<Row>(`update cell_overrides set active = false where supplier_id = $1 and line_no = $2 and active returning raw`, [supplier.id, input.lineNo]);
   if (!rows.length) throw new NotFound(`Line ${input.lineNo} for ${supplier.name} has no correction to undo.`);
@@ -636,7 +662,7 @@ function describeCell(c: { status: string; unitInr: number | null } | undefined)
 // ---------------------------------------------------------------------------
 
 export async function setFxRateAction(ctx: ActionCtx, input: { rfx?: string | null; currency: string; rate: number; source: string }) {
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   const ccy = input.currency.trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(ccy) || ccy === "INR") throw new BadInput("Give a three-letter currency code other than INR, e.g. USD.");
   if (!(input.rate > 0)) throw new BadInput("The rate must be above zero.");
@@ -648,7 +674,7 @@ export async function setFxRateAction(ctx: ActionCtx, input: { rfx?: string | nu
 }
 
 export async function addUnitRuleAction(ctx: ActionCtx, input: { rfx?: string | null; fromUom: string; toUom: string; factor: number; basis: string }) {
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   if (!(input.factor > 0)) throw new BadInput("The factor must be above zero.");
   const row = await one<Row>(`select value from assumptions where rfx_id = $1 and key = 'uom_conversions'`, [rfx.id]);
   const list = ((row?.value ?? []) as Array<{ from_uom: string; to_uom: string; factor: number; basis: string }>)
@@ -660,7 +686,7 @@ export async function addUnitRuleAction(ctx: ActionCtx, input: { rfx?: string | 
 }
 
 export async function addUnitAliasAction(ctx: ActionCtx, input: { rfx?: string | null; askedUom: string; alias: string }) {
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   const row = await one<Row>(`select value from assumptions where rfx_id = $1 and key = 'uom_aliases'`, [rfx.id]);
   const map = { ...((row?.value ?? {}) as Record<string, string[]>) };
   map[input.askedUom] = [...new Set([...(map[input.askedUom] ?? []), input.alias])];
@@ -672,7 +698,7 @@ export async function addUnitAliasAction(ctx: ActionCtx, input: { rfx?: string |
 export async function setPriorPoAction(ctx: ActionCtx, input: {
   rfx?: string | null; poNumber: string; poDate: string; vendor: string; rates: Record<string, number>;
 }) {
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   const row = await one<Row>(`select value from assumptions where rfx_id = $1 and key = 'prior_po'`, [rfx.id]);
   const prev = (row?.value ?? null) as { rates?: Record<string, number> } | null;
   const value = { po_number: input.poNumber, po_date: input.poDate, vendor: input.vendor, rates: { ...(prev?.rates ?? {}), ...input.rates } };
@@ -682,7 +708,7 @@ export async function setPriorPoAction(ctx: ActionCtx, input: {
 }
 
 export async function noteAssumptionAction(ctx: ActionCtx, input: { rfx?: string | null; key: string; value: string; source: string; note?: string | null }) {
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   if (/^(fx:|uom_|prior_po)/.test(input.key)) throw new BadInput("Use set_fx_rate, add_unit_rule or set_prior_po_rates for rules the calculator uses.");
   await setAssumption(rfx.id, { key: input.key, value: input.value, source: input.source, note: input.note ?? null, setBy: ctx.actor });
   await log(ctx, rfx.id, "assumption_changed", `Recorded assumption '${input.key}': ${input.value}.`, { after: input });
@@ -696,7 +722,7 @@ export async function noteAssumptionAction(ctx: ActionCtx, input: { rfx?: string
 export async function resolveUnmappedAction(ctx: ActionCtx, input: {
   rfx?: string | null; itemId: string; lineNo?: number | null; dismiss?: boolean; reason: string;
 }) {
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   const item = await one<Row>(`select u.*, s.code, s.name from unmapped_items u join suppliers s on s.id = u.supplier_id where u.id = $1 and u.rfx_id = $2`, [input.itemId, rfx.id]);
   if (!item) throw new NotFound(`No unmatched item '${input.itemId}' on ${rfx.code}.`);
   if (input.dismiss || !input.lineNo) {
@@ -722,7 +748,7 @@ export async function draftFollowUp(ctx: ActionCtx, input: {
   rfx?: string | null; supplier: string; dueDate?: string | null;
   onlyLines?: number[] | null; onlyQuestions?: string[] | null; kinds?: ChaseKind[] | null;
 }) {
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   const supplier = await resolveSupplier(rfx.id, input.supplier);
   const user = await one<{ name: string; followup_days: number }>("select name, followup_days from users where id = $1", [ctx.userId]);
   const cmp = await loadComparison(rfx);
@@ -791,7 +817,7 @@ export async function recordChaseAction(ctx: ActionCtx, input: {
 }
 
 export async function updateChaseAction(ctx: ActionCtx, rfxRef: string, chaseId: string, patch: { message?: string; answered?: boolean; closedReason?: string | null }) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   const c = await one<Row>(`select * from chases where id = $1 and rfx_id = $2`, [chaseId, rfx.id]);
   if (!c) throw new NotFound("No such chase.");
   await q(
@@ -811,28 +837,50 @@ export async function createAwardAction(ctx: ActionCtx, input: {
   rfx?: string | null; scenario: ScenarioKey; supplier?: string | null; commentary?: string | null;
   includeUnconfirmed?: boolean;
 }) {
-  const rfx = await resolveRfx(ctx.userId, input.rfx);
+  const rfx = await rfxFor(ctx, input.rfx);
   const cmp = await loadComparison(rfx);
   const supplierCode = input.supplier ? (await resolveSupplier(rfx.id, input.supplier)).code : null;
-  const snapshot = buildAwardSnapshot(cmp, input.scenario, supplierCode);
-  const note = awardMarkdown(cmp, snapshot, input.commentary ?? null);
+  const built = buildAwardSnapshot(cmp, input.scenario, supplierCode);
+  // The workspace's limit on one supplier's share: flagged in the note and the audit log, not silently re-split.
+  const over = overLimit(await getSettings(rfx.workspace_id), built.bySupplier, built.linesTotalInr);
+  const limitWarning = over.length
+    ? `Above the workspace limit of one supplier's share: ${over.map((x) => `${x.code} ${x.name} gets ${x.pct}%`).join(", ")}. The approver should confirm this is intended, or ask for the award to be split.`
+    : null;
+  const snapshot = { ...built, limitWarning };
+  const note = awardMarkdown(cmp, built, [limitWarning, input.commentary].filter(Boolean).join("\n\n") || null);
   const token = randomBytes(18).toString("base64url");
   const id = newId("awd");
+  // A new draft replaces any award still waiting: its links stop accepting a decision.
+  const replaced = await q<{ id: string }>(
+    `update awards set status = 'withdrawn', decided_at = now(), decision_note = 'Replaced by a newer award draft.' where rfx_id = $1 and status = 'sent' returning id`, [rfx.id]);
+  for (const r of replaced) await q("update award_steps set status = 'cancelled' where award_id = $1 and status in ('sent', 'waiting')", [r.id]);
   await q(
-    `insert into awards (id, rfx_id, scenario_key, snapshot, note_md, commentary, share_token, status, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,'sent',$8)`,
-    [id, rfx.id, snapshot.key, json(snapshot), note, input.commentary ?? null, token, ctx.actor],
+    `insert into awards (id, rfx_id, scenario_key, snapshot, note_md, commentary, share_token, status, created_by, drafted_by_user)
+     values ($1,$2,$3,$4,$5,$6,$7,'sent',$8,$9)`,
+    [id, rfx.id, snapshot.key, json(snapshot), note, input.commentary ?? null, token, ctx.actor, ctx.userId],
   );
+  const extra = await createSteps({ id, token, totalInr: snapshot.totalInr }, rfx);
   await log(ctx, rfx.id, "award_drafted",
-    `Drafted the award (${snapshot.label}): ₹${Math.round(snapshot.totalInr).toLocaleString("en-IN")} across ${snapshot.linesAwarded} line${snapshot.linesAwarded === 1 ? "" : "s"}. Shared for approval.`,
-    { awardId: id, scenario: snapshot.key });
+    `Drafted the award (${snapshot.label}): ₹${Math.round(snapshot.totalInr).toLocaleString("en-IN")} across ${snapshot.linesAwarded} line${snapshot.linesAwarded === 1 ? "" : "s"}. Shared for approval` +
+    (extra.length ? `, then ${extra.map((x) => x.name).join(", then ")} (over the workspace's approval thresholds).` : "."),
+    { awardId: id, scenario: snapshot.key, steps: extra.map((x) => x.name), issues: limitWarning ? [limitWarning] : [] });
+  await notify((await approversOf(rfx.id)).filter((u) => u !== ctx.userId), "award_waiting",
+    `award waiting for approval on ${rfx.code}`,
+    `An award of ₹${Math.round(snapshot.totalInr).toLocaleString("en-IN")} on ${rfx.code} "${rfx.title}" is waiting for approval.\n\nOpen Bidline, go to the event's Award step, and decide there.`);
+  await announce(rfx.id, "award_waiting", `Award of ₹${Math.round(snapshot.totalInr).toLocaleString("en-IN")} on ${rfx.code} "${rfx.title}" is waiting for approval.`);
   return { rfx, awardId: id, token, snapshot, note };
 }
 
 export async function decideAwardAction(input: { token: string; decision: "approved" | "rejected" | "changes_requested"; name: string; note?: string | null }) {
-  const award = await one<Row>(`select a.*, r.user_id, r.code from awards a join rfx r on r.id = a.rfx_id where a.share_token = $1`, [input.token]);
+  await expireStaleAwards();
+  const award = await awardForToken(input.token);
   if (!award) throw new NotFound("This approval link is not valid.");
   if (!input.name?.trim()) throw new BadInput("Please give your name.");
+  if (award.status !== "sent") throw new BadInput(`This award was already ${String(award.status).replace(/_/g, " ")}${award.decided_by ? ` by ${award.decided_by}` : ""}.`);
+  if (await decideStep({
+    awardId: String(award.id), token: input.token, decision: input.decision, name: input.name.trim(), note: input.note ?? null,
+    log: { userId: String(award.user_id), actor: "approver", rfxId: String(award.rfx_id), code: String(award.code) },
+  })) return;
   // One decision per award. A second visit to the link cannot overturn it.
   const done = await q(
     `update awards set status = $2, decided_by = $3, decided_at = now(), decision_note = $4 where id = $1 and status = 'sent' returning id`,
@@ -840,6 +888,8 @@ export async function decideAwardAction(input: { token: string; decision: "appro
   );
   if (!done.length) throw new BadInput(`This award was already ${String(award.status).replace(/_/g, " ")}${award.decided_by ? ` by ${award.decided_by}` : ""}.`);
   if (input.decision === "approved") await q(`update rfx set status = 'awarded' where id = $1 and status <> 'closed'`, [award.rfx_id]);
+  await announce(String(award.rfx_id), "award_decided", `${input.name.trim()} decided the award on ${award.code}: ${input.decision.replace("_", " ")}.`);
+  if (award.drafted_by_user) await notify([String(award.drafted_by_user)], "award_decided", `award ${input.decision.replace("_", " ")} on ${award.code}`, `${input.name.trim()} decided the award on ${award.code}: ${input.decision.replace("_", " ")}${input.note ? `, "${input.note}"` : "."}`);
   await logEvent({
     userId: String(award.user_id), rfxId: String(award.rfx_id), actor: "approver", kind: "award_decided",
     summary: `${input.name.trim()} ${input.decision === "approved" ? "approved" : input.decision === "rejected" ? "rejected" : "asked for changes to"} the award on ${award.code}${input.note ? `: "${input.note}"` : "."}`,
@@ -855,8 +905,36 @@ export async function decideAwardAction(input: { token: string; decision: "appro
  * Start a new draft from an earlier event: same line items, suppliers and
  * questionnaire, none of the quotes, documents or decisions.
  */
+/** An approver (or admin) deciding inside the app, signed in, instead of on the link. */
+export async function decideAwardInAppAction(ctx: ActionCtx, rfxRef: string, awardId: string, decision: "approved" | "rejected" | "changes_requested", note?: string | null) {
+  const rfx = await rfxFor(ctx, rfxRef, "approve");
+  await expireStaleAwards();
+  const me = await one<{ name: string; email: string }>("select name, email from users where id = $1", [ctx.userId]);
+  const award = await one<{ drafted_by_user: string | null; status: string }>("select drafted_by_user, status from awards where id = $1 and rfx_id = $2", [awardId, rfx.id]);
+  if (!award) throw new NotFound("That award is not on this event.");
+  // Separation of duties: the person who drafted an award cannot approve it.
+  if (award.drafted_by_user === ctx.userId && decision === "approved") throw new BadInput("You drafted this award, so someone else must approve it. You can still ask for changes or reject it.");
+  if (award.status === "expired") throw new BadInput("This approval request expired. Draft the award again to send a fresh one.");
+  if (award.status !== "sent") throw new BadInput(`This award is ${award.status.replace(/_/g, " ")}, so it no longer takes a decision.`);
+  if (await decideStep({
+    awardId, token: null, decision, name: me?.name ?? "Approver", note: note ?? null, decider: { userId: ctx.userId, email: me?.email ?? null },
+    log: { userId: ctx.userId, actor: "user", rfxId: rfx.id, code: rfx.code },
+  })) return;
+  const done = await q(
+    `update awards set status = $3, decided_by = $4, decided_at = now(), decision_note = $5 where id = $1 and rfx_id = $2 and status = 'sent' returning id`,
+    [awardId, rfx.id, decision, me?.name ?? "Approver", note ? note.slice(0, 2000) : null],
+  );
+  if (!done.length) throw new BadInput("This award is no longer awaiting approval.");
+  if (decision === "approved") await q(`update rfx set status = 'awarded' where id = $1 and status <> 'closed'`, [rfx.id]);
+  await announce(rfx.id, "award_decided", `${me?.name ?? "The approver"} decided the award on ${rfx.code}: ${decision.replace("_", " ")}.`);
+  if (award.drafted_by_user && award.drafted_by_user !== ctx.userId) await notify([award.drafted_by_user], "award_decided", `award ${decision.replace("_", " ")} on ${rfx.code}`, `${me?.name ?? "The approver"} decided the award on ${rfx.code}: ${decision.replace("_", " ")}${note ? `, "${note}"` : "."}`);
+  await log(ctx, rfx.id, "award_decided",
+    `${me?.name ?? "Approver"} ${decision === "approved" ? "approved" : decision === "rejected" ? "rejected" : "asked for changes to"} the award on ${rfx.code} in the app${note ? `: "${note}"` : "."}`,
+    { awardId, decision, note: note ?? null });
+}
+
 export async function duplicateRfxAction(ctx: ActionCtx, rfxRef: string | null | undefined, opts: { title?: string | null; dueDate?: string | null } = {}) {
-  const src = await resolveRfx(ctx.userId, rfxRef);
+  const src = await rfxFor(ctx, rfxRef);
   const [lines, suppliers, questions] = await Promise.all([getLines(src.id), getSuppliers(src.id), getQuestions(src.id)]);
   const rfx = await createRfx(ctx.userId, {
     title: opts.title?.trim() || `${src.title} (copy)`, eventType: src.event_type, dueDate: opts.dueDate ?? null,
@@ -870,6 +948,11 @@ export async function duplicateRfxAction(ctx: ActionCtx, rfxRef: string | null |
     // rule that follow-ups go to the buyer's own address.
     createdVia: src.created_via === "demo" ? "demo" : ctx.actor === "claude" ? "claude" : "app",
   });
+  // A copy of a restricted event stays restricted to the same people.
+  if (src.restricted) {
+    await q("update rfx set restricted = true where id = $1", [rfx.id]);
+    await q("insert into rfx_access (rfx_id, user_id, added_by) select $1, user_id, $3 from rfx_access where rfx_id = $2 on conflict do nothing", [rfx.id, src.id, ctx.userId]);
+  }
   for (const s of suppliers) {
     const c = (s.contact ?? {}) as { name?: string | null; email?: string | null; phone?: string | null };
     await addSupplier(rfx.id, { name: s.name, code: s.code, city: s.city, gstin: s.gstin, contactName: c.name ?? null, email: c.email ?? null, phone: c.phone ?? null, channel: s.channel, notes: s.notes });
@@ -882,7 +965,7 @@ export async function duplicateRfxAction(ctx: ActionCtx, rfxRef: string | null |
 }
 
 export async function removeQuestionsAction(ctx: ActionCtx, rfxRef: string | null | undefined, nos: string[], reason: string) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   if (!reason?.trim()) throw new BadInput("Give a reason for removing the question. It is kept in the audit trail.");
   const existing = await getQuestions(rfx.id);
   const gone = existing.filter((x) => nos.map((n) => n.trim().toUpperCase()).includes(x.no.toUpperCase()));
@@ -896,7 +979,7 @@ export async function removeQuestionsAction(ctx: ActionCtx, rfxRef: string | nul
 
 /** Pull back an award that is still awaiting approval. Its link stops accepting decisions. */
 export async function withdrawAwardAction(ctx: ActionCtx, rfxRef: string | null | undefined, reason: string, awardId?: string | null) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef);
   if (!reason?.trim()) throw new BadInput("Give a reason for withdrawing the award. It is kept in the audit trail and shown on the approval link.");
   const award = await one<Row>(
     awardId ? `select * from awards where rfx_id = $1 and id = $2` : `select * from awards where rfx_id = $1 and status = 'sent' order by created_at desc limit 1`,
@@ -908,12 +991,13 @@ export async function withdrawAwardAction(ctx: ActionCtx, rfxRef: string | null 
     [award.id, reason.trim().slice(0, 2000)],
   );
   if (!done.length) throw new BadInput(`That award was already ${String(award.status).replace(/_/g, " ")}. Only an award awaiting approval can be withdrawn.`);
+  await q("update award_steps set status = 'cancelled' where award_id = $1 and status in ('sent', 'waiting')", [award.id]);
   await log(ctx, rfx.id, "award_withdrawn", `Withdrew the award on ${rfx.code}. The approval link no longer accepts a decision.`, { awardId: award.id, reason: reason.trim().slice(0, 2000) });
   return { rfx, awardId: String(award.id) };
 }
 
 export async function addLineNoteAction(ctx: ActionCtx, rfxRef: string | null | undefined, lineNo: number, text: string) {
-  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const rfx = await rfxFor(ctx, rfxRef, "note");
   const body = text?.trim();
   if (!body) throw new BadInput("The note is empty.");
   const line = (await getLines(rfx.id)).find((l) => l.no === lineNo);
@@ -922,4 +1006,51 @@ export async function addLineNoteAction(ctx: ActionCtx, rfxRef: string | null | 
   await q(`insert into line_notes (id, rfx_id, line_no, text, actor) values ($1,$2,$3,$4,$5)`, [id, rfx.id, lineNo, body.slice(0, 2000), ctx.actor]);
   await log(ctx, rfx.id, "line_note_added", `Note on line ${lineNo} (${line.desc}): "${body.slice(0, 300)}"`, { lines: [lineNo] });
   return { rfx, id, line };
+}
+
+// ---------------------------------------------------------------------------
+// Archive and restore, comments on a price
+// ---------------------------------------------------------------------------
+
+export async function archiveRfxAction(ctx: ActionCtx, rfxRef: string | null | undefined, archive: boolean, reason?: string | null) {
+  const rfx = await rfxFor(ctx, rfxRef);
+  if (archive === Boolean(rfx.archived_at)) return rfx;
+  await q("update rfx set archived_at = $2, archived_by = $3 where id = $1", [rfx.id, archive ? new Date().toISOString() : null, archive ? ctx.userId : null]);
+  await log(ctx, rfx.id, archive ? "rfx_archived" : "rfx_restored",
+    archive ? `Archived ${rfx.code}${reason?.trim() ? `: ${reason.trim()}` : "."}` : `Restored ${rfx.code} from the archive.`,
+    { before: archive ? "active" : "archived", after: archive ? "archived" : "active", reason: reason?.trim() || null });
+  return rfx;
+}
+
+export async function addCellCommentAction(ctx: ActionCtx, input: { rfx?: string | null; supplier: string; lineNo: number; text: string }) {
+  const rfx = await rfxFor(ctx, input.rfx, "note");
+  const supplier = await resolveSupplier(rfx.id, input.supplier);
+  const body = input.text?.trim();
+  if (!body) throw new BadInput("The comment is empty.");
+  if (!(await getLines(rfx.id)).some((l) => l.no === input.lineNo)) throw new BadInput(`There is no line ${input.lineNo}.`);
+  const id = newId("cmt");
+  await q("insert into cell_comments (id, rfx_id, supplier_id, line_no, text, user_id, actor) values ($1,$2,$3,$4,$5,$6,$7)",
+    [id, rfx.id, supplier.id, input.lineNo, body.slice(0, 2000), ctx.userId, ctx.actor]);
+  await log(ctx, rfx.id, "cell_commented", `Commented on ${supplier.code} line ${input.lineNo}: "${body.slice(0, 140)}"`,
+    { cell: cellKey(supplier.code, input.lineNo), note: body.slice(0, 500) });
+  return { rfx, supplier, id };
+}
+
+/** Set or change the budget unit price on lines. Budgets drive "saved against budget" and the unusual-price flags. */
+export async function setBudgetAction(ctx: ActionCtx, rfxRef: string | null | undefined, items: Array<{ lineNo: number; budgetInr: number | null }>) {
+  const rfx = await rfxFor(ctx, rfxRef);
+  if (!items.length) throw new BadInput("Say which lines and their budget unit prices.");
+  const lines = await getLines(rfx.id);
+  const changes: string[] = [];
+  for (const it of items) {
+    const l = lines.find((x) => x.no === it.lineNo);
+    if (!l) throw new BadInput(`There is no line ${it.lineNo}.`);
+    if (it.budgetInr !== null && !(it.budgetInr >= 0)) throw new BadInput(`Line ${it.lineNo}: the budget must be zero or more.`);
+    const before = l.baseline_inr || null;
+    if (before === it.budgetInr) continue;
+    await q("update rfx_lines set baseline_inr = $3 where rfx_id = $1 and no = $2", [rfx.id, it.lineNo, it.budgetInr]);
+    changes.push(`line ${it.lineNo} ${before === null ? "none" : `₹${before.toLocaleString("en-IN")}`} -> ${it.budgetInr === null ? "none" : `₹${it.budgetInr.toLocaleString("en-IN")}`}`);
+  }
+  if (changes.length) await log(ctx, rfx.id, "lines_changed", `Changed budget: ${changes.join("; ")}.`, { lines: items.map((i) => i.lineNo), changes });
+  return { rfx, changed: changes.length };
 }

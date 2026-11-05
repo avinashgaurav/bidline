@@ -17,7 +17,7 @@ export function Tip({ text, children, side = "top" }: { text: React.ReactNode; c
 export function InfoTip({ text, label = "What is this?" }: { text: React.ReactNode; label?: string }) {
   return (
     <Tip text={text}>
-      <button type="button" aria-label={label} className="inline-grid size-4 shrink-0 place-items-center rounded-full text-ink-secondary/70 hover:text-primary focus-visible:text-primary">
+      <button type="button" aria-label={label} className="relative inline-grid size-4 shrink-0 place-items-center rounded-full text-ink-secondary/70 before:absolute before:-inset-3 before:content-[''] hover:text-primary focus-visible:text-primary">
         <Info className="size-3.5" />
       </button>
     </Tip>

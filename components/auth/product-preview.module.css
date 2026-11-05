@@ -1,0 +1,96 @@
+/* The sign-in preview plays one short sequence: quotes arrive, the lines
+   converge, prices land in one row, the winning price shows its source and
+   the award is stamped. Every element's resting state is its final state, so
+   reduced motion (and no-CSS-animation browsers) simply see the finished
+   picture. */
+
+.stamp {
+  transform: rotate(-6deg);
+}
+
+.line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .rise {
+    animation: rise 720ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    animation-delay: var(--d, 0ms);
+  }
+
+  .line {
+    animation: draw 900ms cubic-bezier(0.65, 0, 0.35, 1) backwards;
+    animation-delay: var(--d, 0ms);
+  }
+
+  /* The winning cell rises with its row, then lights up once the row is in. */
+  .best {
+    animation:
+      rise 720ms cubic-bezier(0.16, 1, 0.3, 1) backwards,
+      best 900ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    animation-delay: var(--d, 0ms), calc(var(--d, 0ms) + 600ms);
+  }
+
+  .tether {
+    transform-origin: top;
+    animation: tether 420ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    animation-delay: var(--d, 0ms);
+  }
+
+  .reveal {
+    animation: reveal 820ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    animation-delay: var(--d, 0ms);
+  }
+
+  .stamp {
+    animation: stamp 620ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+    animation-delay: var(--d, 0ms);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+    filter: blur(6px);
+  }
+}
+
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+
+@keyframes best {
+  from {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px transparent;
+  }
+}
+
+@keyframes tether {
+  from {
+    transform: scaleY(0);
+  }
+}
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    clip-path: inset(0 100% 0 0 round 10px);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0 round 10px);
+  }
+}
+
+@keyframes stamp {
+  from {
+    opacity: 0;
+    transform: rotate(-14deg) scale(1.7);
+    filter: blur(3px);
+  }
+}

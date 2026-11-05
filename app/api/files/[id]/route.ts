@@ -1,6 +1,7 @@
 import { currentUser } from "@/lib/auth";
 import { one } from "@/lib/db";
 import { documentBytes, type DocumentRow } from "@/lib/files";
+import { ME_CTE, VISIBLE } from "@/lib/rfx";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,8 +12,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!user) return new Response("Sign in to view this file.", { status: 401 });
   const { id } = await params;
   const doc = await one<DocumentRow>(
-    "select d.* from documents d join rfx r on r.id = d.rfx_id where d.id = $1 and r.user_id = $2",
-    [id, user.id],
+    `with ${ME_CTE} select d.* from documents d join rfx r on r.id = d.rfx_id, me where d.id = $2 and ${VISIBLE}`,
+    [user.id, id],
   );
   if (!doc) return new Response("Not found.", { status: 404 });
   const bytes = await documentBytes(doc);

@@ -188,6 +188,11 @@
   background: var(--card);
   border-right: 1px solid var(--grid-line);
 }
+/* On a phone the item column keeps under half the width, so prices stay in view. */
+@media (max-width: 639px) {
+  .grid-table .col-sticky { max-width: 44vw; }
+  .grid-table .col-sticky .truncate { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+}
 
 .grid-table thead .col-sticky {
   z-index: 4;
@@ -227,3 +232,21 @@
 ::selection {
   background: rgba(82, 102, 235, 0.18);
 }
+
+/* Entrance motion: content settles in once, quickly. Off for reduced motion. */
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.rise { animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@keyframes grow-x {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+.grow-x { transform-origin: left center; animation: grow-x 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .rise, .grow-x { animation: none; }
+}
+
+/* Focus on the night sidebar needs a brighter ring than the indigo on light surfaces. */
+aside a:focus-visible, aside button:focus-visible, aside input:focus-visible { outline: 2px solid #aab4ff; outline-offset: 1px; }
