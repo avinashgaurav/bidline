@@ -28,7 +28,7 @@ export default async function SettingsPage() {
         <EmailForm account={account} providers={PROVIDERS} defaultName={user.name} defaultEmail={user.email} />
       </Section>
       <Section id="claude" title="Claude connection" text="Your personal connector link. Anyone with it can work in your Bidline account, so keep it private.">
-        <ConnectCard url={`${base}/mcp/${user.mcp_token}`} connectedAt={user.last_mcp_at} />
+        <ConnectCard url={`${base}/mcp/${user.mcp_token}`} connectedAt={user.last_mcp_at} bare />
       </Section>
       <Section title="Defaults" text="Applied when a new sourcing event or follow-up is created. You can change them on each one.">
         <DefaultsForm followupDays={me?.followup_days ?? 3} approverName={me?.default_approver_name ?? ""} approverEmail={me?.default_approver_email ?? ""} />

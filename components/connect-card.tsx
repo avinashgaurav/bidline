@@ -2,13 +2,17 @@ import { CopyButton } from "@/components/copy-button";
 import { RegenerateButton } from "@/components/regenerate-button";
 
 /** The personal connector link and how to add it to Claude. */
-export function ConnectCard({ url, connectedAt, compact = false }: { url: string; connectedAt: string | null; compact?: boolean }) {
+export function ConnectCard({ url, connectedAt, compact = false, bare = false }: {
+  url: string; connectedAt: string | null; compact?: boolean;
+  /** Inside a section that already has its own frame and title: no second card. */
+  bare?: boolean;
+}) {
   return (
-    <div className="rounded-xl bg-card p-6 ring-1 ring-border">
+    <div className={bare ? "" : "rounded-xl bg-card p-6 ring-1 ring-border"}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="eyebrow">Your Claude connector</p>
-          <p className="mt-1 text-sm text-ink-secondary">
+          {bare ? null : <p className="eyebrow">Your Claude connector</p>}
+          <p className={`${bare ? "" : "mt-1 "}text-sm text-ink-secondary`}>
             {connectedAt
               ? <>Connected. Claude last used Bidline {new Date(connectedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}.</>
               : "Not connected. Add this link to Claude once. It is unique to your account."}
