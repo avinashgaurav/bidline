@@ -4,7 +4,7 @@
 
 Live app: **https://bidline-app.vercel.app**
 
-A buyer asks three to five suppliers for quotes. The replies come back as a spreadsheet, a PDF, a Word letter, an email and a phone photo of a rate card. Today someone retypes all of it into one sheet before anyone can compare a price, and a "box of 10" priced per piece quietly makes the wrong supplier win.
+Bidline is a procurement workspace. Each purchase is a **sourcing event** (an RFQ by default, or an RFP, RFI or tender). A buyer asks three to five suppliers for quotes. The replies come back as a spreadsheet, a PDF, a Word letter, an email and a phone photo of a rate card. Today someone retypes all of it into one sheet before anyone can compare a price, and a "box of 10" priced per piece quietly makes the wrong supplier win.
 
 Bidline is the system of record around the buyer's own Claude:
 
@@ -18,7 +18,7 @@ Bidline is the system of record around the buyer's own Claude:
 ## Try it
 
 1. Sign in at https://bidline-app.vercel.app (test login in the submission email), or create an account.
-2. Connect Claude. The Connect Claude page shows your personal connector link.
+2. Connect Claude. On first sign-in a popup walks you through it and confirms "Claude MCP connected" as soon as Claude reaches Bidline. The link is also on the Connect Claude page.
    - **Claude on the web or desktop:** Settings, then Connectors, then *Add custom connector*. Name it Bidline, paste the link, add. In a chat, switch Bidline on from the tools menu.
    - **Claude Code:** `claude mcp add --transport http bidline <your link>`
 3. Choose how to start:
@@ -36,13 +36,16 @@ Bidline is the system of record around the buyer's own Claude:
 
 | Area | What it does |
 |---|---|
+| Sidebar | Sourcing events (with the open event's steps), Ask Claude, Connect Claude, Docs, Settings, sign out |
+| Ask | Instant answers worked out in code (cheapest, savings against budget, price differences, categories, qualification, what is owed, a line, a supplier); anything else is handed to your Claude |
+| Settings | Profile; your own mailbox for supplier follow-ups (SMTP with an app password, checked before saving, stored encrypted); Claude link; defaults |
 | Comparison | Line by supplier grid of landed prices per asked unit. Lowest comparable price highlighted; caveats, prices needing a person and missing prices marked without relying on colour alone |
 | Cell drawer | Supplier's words, document and location, each conversion step, flags, correction with reason, undo, history |
 | Documents | Drag and drop supplier files; assign supplier and kind; open the original |
 | Lines | Edit what Claude created: items, units, pack sizes, quantities, budgets. Vague lines are flagged before issuing |
 | Suppliers | Contacts, status, terms as read, stated totals, conditional offers |
 | Questionnaire | Pass, fail or not assessed per question, with the sentence that decided it |
-| Chase | What each supplier still owes and the money riding on it; a drafted message to send |
+| Follow-ups | What each supplier still owes and the value affected; an editable draft you email from your own mailbox, or record without sending |
 | Award | Award options with like-for-like restatement; award note and approval link |
 | Rules & items | Exchange rates, unit rules, prior-order rates, items that match no line |
 | Activity | Every request made in Claude, every tool call, every edit and approval; download as `transcript.md` |
@@ -90,7 +93,8 @@ npm run test:mcp      # end-to-end through MCP and the database (needs a running
 
 ## Limits, on purpose
 
-- Chases are recorded and copyable, not sent; email delivery is next.
+- Follow-ups are sent through the buyer's own mailbox (SMTP). On demo events they go to the buyer's own address, because demo suppliers are fictional.
+- On Claude Team and Enterprise, one connector link maps to one Bidline account; per-user sign-in (OAuth) is next.
 - A scanned PDF with no text layer is read by attaching it in the Claude chat; Bidline does no OCR because that would be AI inside the app.
 - One buyer per workspace for now; teams come next.
 - All demo companies, people and prices are fictional.
