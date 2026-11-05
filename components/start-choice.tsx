@@ -105,7 +105,7 @@ function DemoConfirm({ back }: { back: React.ReactNode }) {
       <ol className="grid gap-2.5 text-[14px]">
         {[
           "An IT hardware RFQ with 30 line items, 5 suppliers and 12 supplier files waiting to be read: Excel, PDF, Word, an email and a phone photo.",
-          "Office furniture, already compared and approved; and housekeeping supplies, with quotes partly in and a follow-up overdue.",
+          "A few seconds later, two more arrive: office furniture, already compared and approved; and housekeeping supplies, with quotes partly in and a follow-up overdue.",
           "You ask your Claude to read them. Prices fill the comparison within seconds.",
           "You check, correct, follow up and send the award for approval.",
         ].map((t, i) => (
