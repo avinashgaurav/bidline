@@ -1,0 +1,214 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-inter);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-night: var(--night);
+  --color-night-raised: var(--night-raised);
+  --color-on-dark: var(--on-dark);
+  --color-fog: var(--fog);
+  --color-lavender: var(--lavender);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-3xl: 24px;
+  --radius-4xl: 32px;
+}
+
+/* Mercury design tokens (docs/DESIGN.md): a quiet light product world framed
+   by a night navigation bar, one indigo action colour, fill instead of shadow. */
+:root {
+  --background: #fbfcfd;
+  --foreground: #28253b;
+  --card: #ffffff;
+  --card-foreground: #28253b;
+  --popover: #ffffff;
+  --popover-foreground: #28253b;
+  --primary: #5266eb;
+  --primary-foreground: #ffffff;
+  --secondary: rgba(82, 102, 235, 0.1);
+  --secondary-foreground: #28253b;
+  --muted: #f3f3f8;
+  --muted-foreground: #554e7b;
+  --accent: #edecfb;
+  --accent-foreground: #28253b;
+  --destructive: #c4314b;
+  --border: #e6e6ee;
+  --input: #dcdce6;
+  --ring: #5266eb;
+  --radius: 12px;
+
+  --night: #171721;
+  --night-raised: #1e1e2a;
+  --on-dark: #ededf3;
+  --fog: #c3c3cc;
+  --lavender: #edecfb;
+  --ink-secondary: #554e7b;
+  --success: #1f7a4d;
+  --warning: #9a5b00;
+
+  /* Grid cell states: trusted (plain), review (amber rule), caveat (red rule),
+     empty (hatched, no number). Never colour alone. */
+  --cell-review: #9a5b00;
+  --cell-review-bg: #fdf6e7;
+  --cell-caveat: #c4314b;
+  --cell-caveat-bg: #fdf0f2;
+  --cell-empty: #ececf2;
+  --cell-best: #e8f4ee;
+  --grid-line: #ececf2;
+  --grid-head: #f6f6fa;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-weight: 400;
+  }
+  html {
+    @apply font-sans;
+  }
+  h1, h2, h3 {
+    font-weight: 480;
+    letter-spacing: 0.005em;
+  }
+}
+
+.eyebrow {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+.cell-review {
+  background: var(--cell-review-bg);
+  box-shadow: inset 2px 0 0 var(--cell-review);
+}
+
+.cell-caveat {
+  background: var(--cell-caveat-bg);
+  box-shadow: inset 2px 0 0 var(--cell-caveat);
+}
+
+.cell-empty {
+  background-image: repeating-linear-gradient(45deg, var(--cell-empty) 0 2px, transparent 2px 6px);
+  color: var(--ink-secondary);
+}
+
+.cell-best {
+  background: var(--cell-best);
+  font-weight: 500;
+}
+
+.grid-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+}
+
+.grid-table th,
+.grid-table td {
+  border-bottom: 1px solid var(--grid-line);
+  padding: 0 10px;
+  height: 34px;
+  white-space: nowrap;
+}
+
+.grid-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--grid-head);
+  font-weight: 500;
+  text-align: left;
+  vertical-align: bottom;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.grid-table tbody tr:hover td {
+  box-shadow: inset 0 0 0 999px rgba(82, 102, 235, 0.05);
+}
+
+.grid-table tbody tr:hover td.cell-review {
+  box-shadow: inset 2px 0 0 var(--cell-review), inset 0 0 0 999px rgba(82, 102, 235, 0.05);
+}
+
+.grid-table tbody tr:hover td.cell-caveat {
+  box-shadow: inset 2px 0 0 var(--cell-caveat), inset 0 0 0 999px rgba(82, 102, 235, 0.05);
+}
+
+.col-sticky {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--card);
+  border-right: 1px solid var(--grid-line);
+}
+
+.grid-table thead .col-sticky {
+  z-index: 4;
+  background: var(--grid-head);
+}
+
+.group-row td {
+  background: var(--muted);
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  height: 26px;
+  color: var(--ink-secondary);
+}
+
+:where(a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"]), [role="button"]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.prose-note h1 { font-size: 22px; margin: 0 0 8px; }
+.prose-note h2 { font-size: 16px; margin: 20px 0 8px; font-weight: 500; }
+.prose-note p, .prose-note li { font-size: 14px; line-height: 1.55; }
+.prose-note ul { list-style: disc; padding-left: 20px; margin: 6px 0; }
+.prose-note blockquote { border-left: 3px solid var(--cell-review); background: var(--cell-review-bg); padding: 8px 12px; margin: 8px 0; font-size: 14px; }
+.prose-note table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 8px 0; }
+.prose-note th, .prose-note td { border-bottom: 1px solid var(--grid-line); padding: 6px 8px; text-align: left; }
+.prose-note th { background: var(--grid-head); font-weight: 500; }

@@ -1,0 +1,860 @@
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import type { User } from "../auth";
+import { q } from "../db";
+import { logEvent, listEvents, transcriptMarkdown } from "../events";
+import {
+  BadInput, NotFound, getLines, getQuestions, listRfxs, qualityGate, resolveRfx, resolveSupplier,
+} from "../rfx";
+import { documentBytes, getDocument, listDocuments } from "../files";
+import { documentContent, type McpContent } from "../extract/for-claude";
+import { QUESTIONNAIRE_READING_RULES, QUOTE_READING_RULES, lineCatalogText, questionCatalogText } from "../extract/prompt";
+import { RAW_STATUSES } from "../extract/contract";
+import { cellKey, loadComparison } from "../comparison";
+import {
+  addQuestionsAction, addSuppliersAction, addUnitAliasAction, addUnitRuleAction, clearCorrectionAction,
+  correctCellAction, createAwardAction, createRfxAction, issueRfxAction, noteAssumptionAction,
+  recordChaseAction, removeLinesAction, resolveUnmappedAction, saveTextDocumentAction, setFxRateAction,
+  setPriorPoAction, submitQuestionnaireAction, submitQuoteAction, submitSecondReadAction,
+  updateRfxAction, updateSupplierAction, upsertLinesAction, type ActionCtx,
+} from "../actions";
+import { cheapestPerLine, likeForLike } from "../calc/normalise";
+import {
+  cellText, gridText, inr, lineText, needsAttentionText, overview, rfxHeader, statusWords, supplierText,
+} from "./format";
+
+type Content = McpContent;
+type ToolResult = { content: Content[]; isError?: boolean };
+
+const USER_REQUEST = z.string().optional().describe(
+  "The user's message that led to this call, quoted as closely as you can. Bidline records it in the RFQ's activity log.",
+);
+const RFX = z.string().optional().describe(
+  "RFQ code (e.g. RFX-2026-0142) or id. Leave out to use the most recently updated RFQ.",
+);
+
+const text = (t: string): ToolResult => ({ content: [{ type: "text", text: t }] });
+
+/**
+ * Build an MCP server bound to one Bidline user. Created per request: the
+ * endpoint is stateless, so any Vercel instance can answer any call.
+ */
+export function buildServer(user: User, appUrl: string): McpServer {
+  const server = new McpServer(
+    { name: "bidline", version: "1.0.0", title: "Bidline" },
+    {
+      instructions:
+        "Bidline compares supplier quotes for an RFQ. You read the supplier documents and submit what they say. Bidline stores everything, " +
+        "does every calculation (units, currency, totals, award options, questionnaire results) and updates the web app the buyer uses. " +
+        "Never calculate totals or conversions yourself. Use get_comparison, compare_award_options or what_if and quote Bidline's figures. " +
+        "To read supplier documents: list_documents, then read_document, then submit_quote (quotes) or submit_questionnaire (questionnaires and certificates). " +
+        "Files the user attaches in chat can be read directly and submitted the same way. If unsure, start with get_started.",
+    },
+  );
+
+  async function run(tool: string, args: { user_request?: string }, fn: (ctx: ActionCtx) => Promise<ToolResult | string>, opts: { query?: string; rfx?: string } = {}): Promise<ToolResult> {
+    const ctx: ActionCtx = { userId: user.id, actor: "claude", tool, userRequest: args.user_request ?? null };
+    try {
+      await q("update users set last_mcp_at = now() where id = $1", [user.id]);
+      const out = await fn(ctx);
+      if (opts.query) {
+        const rfxId = opts.rfx !== undefined ? await resolveRfx(user.id, opts.rfx).then((r) => r.id).catch(() => null) : null;
+        await logEvent({ userId: user.id, rfxId, actor: "claude", kind: "query", tool, userRequest: ctx.userRequest, summary: opts.query });
+      }
+      return typeof out === "string" ? text(out) : out;
+    } catch (e) {
+      const known = e instanceof BadInput || e instanceof NotFound;
+      if (!known) console.error(`[mcp:${tool}]`, e);
+      return { content: [{ type: "text", text: known ? (e as Error).message : `Bidline error: ${(e as Error).message}` }], isError: true };
+    }
+  }
+
+  const ro = { readOnlyHint: true, openWorldHint: false } as const;
+  const rw = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
+
+  // -------------------------------------------------------------------------
+  // Orientation
+  // -------------------------------------------------------------------------
+
+  server.registerTool("get_started", {
+    title: "Bidline overview and workspace",
+    description: "Explains Bidline, lists the RFQs in this workspace and suggests next steps. Call this first if the user asks what Bidline can do.",
+    inputSchema: { user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("get_started", args, async () => {
+    const rfxs = await listRfxs(user.id);
+    return [
+      `Bidline workspace of ${user.name} (${user.email}). App: ${appUrl}`,
+      "",
+      "Bidline turns supplier quotes in any format into one like-for-like comparison. Every price links back to the supplier's document. The buyer can edit any price with a reason, record follow-ups for missing items, and send the award note to the approver as a link. You read the documents. Bidline does the calculations.",
+      "",
+      rfxs.length
+        ? "RFQS\n" + rfxs.map((r) => `- ${r.code} "${r.title}" [${r.status}]: ${r.line_count} line items, ${r.responded}/${r.supplier_count} suppliers quoted, ${r.unread_docs} unread documents. ${appUrl}/rfx/${r.id}`).join("\n")
+        : "No RFQs yet. Create one with create_rfx, or the user can load the demo RFQ from the dashboard.",
+      "",
+      "TYPICAL FLOW",
+      "1. create_rfx (lines, suppliers, questionnaire) and issue_rfx",
+      "2. Suppliers send quotes: the user uploads files in the app or attaches them here. list_documents, read_document, then submit_quote / submit_questionnaire",
+      "3. get_comparison, list_needs_attention, explain_cell, correct_price, set_fx_rate",
+      "4. get_chase_list and record_chase for follow-ups on missing items",
+      "5. compare_award_options or what_if, then create_award. The approver approves through the link it returns",
+    ].join("\n");
+  }, { query: "Opened Bidline (get_started)." }));
+
+  server.registerTool("list_rfxs", {
+    title: "List RFQs",
+    description: "Every RFQ in this workspace with status, suppliers who have quoted and unread documents.",
+    inputSchema: { user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("list_rfxs", args, async () => {
+    const rfxs = await listRfxs(user.id);
+    if (!rfxs.length) return "No RFQs yet.";
+    return rfxs.map((r) => `${r.code} | ${r.title} | ${r.status} | ${r.line_count} line items | ${r.responded}/${r.supplier_count} quoted | ${r.unread_docs} unread docs | ${appUrl}/rfx/${r.id}`).join("\n");
+  }));
+
+  server.registerTool("get_rfx", {
+    title: "RFQ details",
+    description: "The RFQ details, every line item (item, specification, unit, pack size, quantity), the suppliers and their status, the questionnaire and any unclear line items.",
+    inputSchema: { rfx: RFX, user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("get_rfx", args, async () => {
+    const rfx = await resolveRfx(user.id, args.rfx);
+    const cmp = await loadComparison(rfx);
+    const gate = qualityGate(cmp.lines);
+    const terms = Object.entries(rfx.terms_asked ?? {}).map(([k, v]) => `- ${k}: ${v}`);
+    return [
+      rfxHeader(cmp, appUrl),
+      `Buyer: ${JSON.stringify(rfx.buyer)}. Approver: ${JSON.stringify(rfx.approver)}.`,
+      terms.length ? "Terms requested:\n" + terms.join("\n") : "",
+      "",
+      "LINE ITEMS",
+      ...cmp.lines.map((l) => `L${l.no} ${l.sku} | ${l.desc} | ${l.qty} x ${l.uom}${l.pack_size > 1 ? ` (${l.pack_size} per ${l.uom})` : ""} | budget ${inr(l.baseline_inr)}`),
+      "",
+      "SUPPLIERS",
+      ...cmp.suppliers.map((s) => `${s.code} ${s.name} [${s.status}] ${JSON.stringify(s.contact)}`),
+      "",
+      questionCatalogText(cmp.questions),
+      gate.length ? "\nUNCLEAR LINE ITEMS\n" + gate.map((g) => `L${g.lineNo}: ${g.issue}`).join("\n") : "",
+    ].filter((x) => x !== "").join("\n");
+  }, { query: "Viewed the RFQ details.", rfx: args.rfx ?? "" }));
+
+  // -------------------------------------------------------------------------
+  // Creating and editing an enquiry
+  // -------------------------------------------------------------------------
+
+  const LINE = z.object({
+    no: z.number().int().positive().optional().describe("Line number. Leave out to add a new line at the end."),
+    sku: z.string().optional().describe("Short item code, e.g. LT-BUS-14."),
+    group: z.string().optional().describe("Category heading, e.g. Enduser Compute."),
+    description: z.string().describe("What is being bought, with the key specification."),
+    spec: z.record(z.string(), z.any()).optional().describe("Spec as key/value pairs, e.g. {ram_gb: 16}."),
+    uom: z.string().describe("The unit of measure being priced: 'nos', 'box of 10', 'kit', 'pack of 5'. State the pack size for any box or pack."),
+    packSize: z.number().int().positive().optional().describe("Pack size: billable units in one uom. 10 for 'box of 10'."),
+    qty: z.number().int().positive().describe("Quantity required, in uom."),
+    hsn: z.string().optional(),
+    baselineInr: z.number().optional().describe("Budget or last-paid price per uom in INR, if known."),
+  });
+  const SUPPLIER = z.object({
+    name: z.string(),
+    city: z.string().optional(),
+    contactName: z.string().optional(),
+    email: z.string().optional(),
+    phone: z.string().optional(),
+    channel: z.string().optional().describe("email, WhatsApp, portal..."),
+    gstin: z.string().optional(),
+    notes: z.string().optional(),
+  });
+  const QUESTION = z.object({
+    no: z.string().optional().describe("e.g. Q3. Leave out to number automatically."),
+    question: z.string(),
+    mandatory: z.boolean().optional().describe("True if a supplier that fails it is not qualified, whatever the price. Default true."),
+    documentRequired: z.boolean().optional().describe("True if a supporting document (certificate, letter) must be attached."),
+  });
+
+  server.registerTool("create_rfx", {
+    title: "Create an RFQ",
+    description: "Create a new RFQ from what the user needs to buy: title, line items, and optionally suppliers to invite and a supplier questionnaire. Returns the RFQ code, any unclear line items, and the link to open it in the app.",
+    inputSchema: {
+      title: z.string(),
+      dueDate: z.string().optional().describe("Quote due date, YYYY-MM-DD."),
+      buyerName: z.string().optional(),
+      buyerEmail: z.string().optional(),
+      approverName: z.string().optional().describe("Who approves the award, e.g. the CFO."),
+      approverEmail: z.string().optional(),
+      termsAsked: z.record(z.string(), z.string()).optional().describe("Commercial terms requested from suppliers, e.g. {delivery: 'FOR destination', payment: 'Net 30'}."),
+      notes: z.string().optional(),
+      lines: z.array(LINE).min(1),
+      suppliers: z.array(SUPPLIER).optional(),
+      questions: z.array(QUESTION).optional(),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("create_rfx", args, async (ctx) => {
+    const { rfx, lines, gate } = await createRfxAction(ctx, {
+      title: args.title, dueDate: args.dueDate ?? null,
+      buyer: { name: args.buyerName ?? user.name, email: args.buyerEmail ?? user.email },
+      approver: { name: args.approverName ?? null, email: args.approverEmail ?? null },
+      termsAsked: args.termsAsked ?? {}, notes: args.notes ?? null,
+      lines: args.lines, suppliers: args.suppliers, questions: args.questions,
+    });
+    return [
+      `Created ${rfx.code} "${rfx.title}" with ${lines.length} line items${args.suppliers?.length ? ` and ${args.suppliers.length} suppliers` : ""}.`,
+      `Open in Bidline: ${appUrl}/rfx/${rfx.id}`,
+      gate.length
+        ? `\nBidline found ${gate.length} unclear line item${gate.length === 1 ? "" : "s"} that suppliers could price differently:\n${gate.map((g) => `- L${g.lineNo}: ${g.issue}. Fix: ${g.fix}`).join("\n")}\nFix them with upsert_lines, or issue anyway with a reason.`
+        : "\nAll line items are specific enough to issue. Use issue_rfx when the user is ready.",
+    ].join("\n");
+  }));
+
+  server.registerTool("update_rfx", {
+    title: "Update RFQ details",
+    description: "Change the title, due date, status, buyer, approver, terms requested or notes of an RFQ.",
+    inputSchema: {
+      rfx: RFX,
+      title: z.string().optional(),
+      dueDate: z.string().optional().describe("YYYY-MM-DD"),
+      status: z.enum(["draft", "issued", "evaluating", "awarded", "closed"]).optional(),
+      approverName: z.string().optional(),
+      approverEmail: z.string().optional(),
+      termsAsked: z.record(z.string(), z.string()).optional(),
+      notes: z.string().optional(),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("update_rfx", args, async (ctx) => {
+    const r = await updateRfxAction(ctx, args.rfx, {
+      title: args.title, dueDate: args.dueDate, status: args.status, notes: args.notes, termsAsked: args.termsAsked,
+      approver: args.approverName || args.approverEmail ? { ...(args.approverName ? { name: args.approverName } : {}), ...(args.approverEmail ? { email: args.approverEmail } : {}) } : undefined,
+    });
+    return `Updated ${r.code}. ${appUrl}/rfx/${r.id}`;
+  }));
+
+  server.registerTool("upsert_lines", {
+    title: "Add, change or remove line items",
+    description: "Add new line items, change existing ones (give their line number), or remove line items. Returns any unclear line items.",
+    inputSchema: {
+      rfx: RFX,
+      lines: z.array(LINE).optional(),
+      remove: z.array(z.number().int()).optional().describe("Line numbers to remove."),
+      reason: z.string().optional().describe("Reason for removing the lines."),
+      user_request: USER_REQUEST,
+    },
+    annotations: { ...rw, destructiveHint: true },
+  }, async (args) => run("upsert_lines", args, async (ctx) => {
+    const out: string[] = [];
+    if (args.lines?.length) {
+      const r = await upsertLinesAction(ctx, args.rfx, args.lines);
+      out.push(`Saved line${r.touched.length === 1 ? "" : "s"} ${r.touched.join(", ")} on ${r.rfx.code}.`);
+      if (r.gate.length) out.push(`Unclear line items:\n${r.gate.map((g) => `- L${g.lineNo}: ${g.issue}`).join("\n")}`);
+    }
+    if (args.remove?.length) {
+      const r = await removeLinesAction(ctx, args.rfx, args.remove, args.reason ?? "removed in Claude");
+      out.push(`Removed line${args.remove.length === 1 ? "" : "s"} ${args.remove.join(", ")} from ${r.rfx.code}.`);
+    }
+    return out.join("\n") || "No changes made.";
+  }));
+
+  server.registerTool("add_questions", {
+    title: "Add questionnaire questions",
+    description: "Add or change supplier questionnaire questions. A supplier that fails a mandatory question is not qualified, whatever the price.",
+    inputSchema: { rfx: RFX, questions: z.array(QUESTION).min(1), user_request: USER_REQUEST },
+    annotations: rw,
+  }, async (args) => run("add_questions", args, async (ctx) => {
+    const r = await addQuestionsAction(ctx, args.rfx, args.questions);
+    return `Saved ${args.questions.length} question${args.questions.length === 1 ? "" : "s"} on ${r.rfx.code}.\n${questionCatalogText(await getQuestions(r.rfx.id))}`;
+  }));
+
+  server.registerTool("issue_rfx", {
+    title: "Issue the RFQ",
+    description: "Mark the RFQ as issued to its suppliers. Bidline holds it while any line item is unclear, unless a reason is given. The reason is shown in the award note. Bidline records the issue but does not send emails.",
+    inputSchema: { rfx: RFX, overrideReason: z.string().optional(), user_request: USER_REQUEST },
+    annotations: rw,
+  }, async (args) => run("issue_rfx", args, async (ctx) => {
+    const r = await issueRfxAction(ctx, args.rfx, args.overrideReason);
+    if (!r.issued) {
+      return `Not issued: ${r.gate.length} line item${r.gate.length === 1 ? " is" : "s are"} unclear.\n${r.gate.map((g) => `- L${g.lineNo}: ${g.issue}. Fix: ${g.fix}`).join("\n")}\nFix with upsert_lines, or call issue_rfx again with overrideReason.`;
+    }
+    return `${r.rfx.code} is issued. Suppliers are marked as invited. Bidline does not send emails, so send the RFQ to suppliers yourself. ${appUrl}/rfx/${r.rfx.id}`;
+  }));
+
+  server.registerTool("add_suppliers", {
+    title: "Add suppliers",
+    description: "Add suppliers to an RFQ. Each gets a code (V1, V2...) used in all other tools.",
+    inputSchema: { rfx: RFX, suppliers: z.array(SUPPLIER).min(1), user_request: USER_REQUEST },
+    annotations: rw,
+  }, async (args) => run("add_suppliers", args, async (ctx) => {
+    const r = await addSuppliersAction(ctx, args.rfx, args.suppliers);
+    return `Added to ${r.rfx.code}: ${r.added.map((s) => `${s.code} ${s.name}`).join(", ")}.`;
+  }));
+
+  server.registerTool("update_supplier", {
+    title: "Update a supplier",
+    description: "Change a supplier's details or status (invited, responded, declined, removed).",
+    inputSchema: {
+      rfx: RFX, supplier: z.string().describe("Code (V2), name or id."),
+      name: z.string().optional(), city: z.string().optional(), contactName: z.string().optional(),
+      email: z.string().optional(), phone: z.string().optional(), channel: z.string().optional(),
+      status: z.enum(["invited", "responded", "declined", "removed"]).optional(), notes: z.string().optional(),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("update_supplier", args, async (ctx) => {
+    const { rfx: _r, supplier, user_request: _u, ...patch } = args;
+    void _r; void _u;
+    const s = await updateSupplierAction(ctx, args.rfx, supplier, patch);
+    return `Updated ${s.code} ${s.name} [${s.status}].`;
+  }));
+
+  // -------------------------------------------------------------------------
+  // Documents and reading
+  // -------------------------------------------------------------------------
+
+  server.registerTool("list_documents", {
+    title: "List supplier documents",
+    description: "Files on an RFQ (uploaded in the app or saved from chat): id, file name, supplier, type (quotation, questionnaire, certificate) and read status.",
+    inputSchema: { rfx: RFX, unreadOnly: z.boolean().optional(), user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("list_documents", args, async () => {
+    const rfx = await resolveRfx(user.id, args.rfx);
+    const docs = (await listDocuments(rfx.id)).filter((d) => !args.unreadOnly || d.status === "unread");
+    if (!docs.length) return `${rfx.code} has no ${args.unreadOnly ? "unread " : ""}documents. The user can upload files at ${appUrl}/rfx/${rfx.id}?tab=documents or attach them in this chat.`;
+    return `${rfx.code} documents (newest first):\n` + docs.map((d) =>
+      `- ${d.id} | ${d.filename} | ${d.kind} | ${d.supplier_code ? `${d.supplier_code} ${d.supplier_name}` : "supplier unknown"} | ${d.status} | ${Math.round(d.byte_size / 1024)} KB`).join("\n") +
+      "\nRead one with read_document.";
+  }, { query: "Listed the RFQ's documents.", rfx: args.rfx ?? "" }));
+
+  server.registerTool("read_document", {
+    title: "Open a supplier document",
+    description: "Returns a stored document's contents for you to read (spreadsheet cells with addresses, PDF text with page and line numbers, Word paragraphs, email body, or the photo), with the RFQ line catalog and the reading rules. Then call submit_quote or submit_questionnaire with its documentId.",
+    inputSchema: {
+      rfx: RFX,
+      document: z.string().optional().describe("Document id or filename. Leave out to open the oldest unread document."),
+      user_request: USER_REQUEST,
+    },
+    annotations: ro,
+  }, async (args) => run("read_document", args, async () => {
+    const rfx = await resolveRfx(user.id, args.rfx);
+    let doc = args.document ? await getDocument(rfx.id, args.document) : null;
+    if (!args.document) {
+      const unread = (await listDocuments(rfx.id)).filter((d) => d.status === "unread").reverse();
+      doc = unread[0] ?? null;
+      if (!doc) return `No unread documents on ${rfx.code}.`;
+    }
+    if (!doc) throw new NotFound(`No document '${args.document}' on ${rfx.code}. Use list_documents.`);
+    const supplier = doc.supplier_id ? await resolveSupplier(rfx.id, doc.supplier_id).catch(() => null) : null;
+    const bytes = await documentBytes(doc);
+    const { format, content } = await documentContent(bytes, doc.filename, doc.mime_type);
+    const isQ = doc.kind === "questionnaire" || doc.kind === "certificate";
+    const header = [
+      `DOCUMENT ${doc.id}: ${doc.filename} (${format}, ${doc.kind}) on ${rfx.code}`,
+      supplier ? `From supplier ${supplier.code} ${supplier.name}.` : "Supplier not known yet: identify it from the letterhead and pass it as `supplier` (a new name is added as a new supplier).",
+      isQ ? `Submit with submit_questionnaire, documentId "${doc.id}".` : `Submit with submit_quote, documentId "${doc.id}". If it turns out to be a questionnaire or certificate, use submit_questionnaire instead.`,
+      "",
+      isQ ? QUESTIONNAIRE_READING_RULES : QUOTE_READING_RULES,
+      "",
+      isQ ? questionCatalogText(await getQuestions(rfx.id)) : lineCatalogText(await getLines(rfx.id)),
+      "",
+      "=== DOCUMENT CONTENT ===",
+    ].join("\n");
+    await logEvent({ userId: user.id, rfxId: rfx.id, actor: "claude", kind: "query", tool: "read_document", userRequest: args.user_request ?? null, summary: `Opened ${doc.filename} to read it.` });
+    return { content: [{ type: "text", text: header }, ...content] };
+  }));
+
+  server.registerTool("save_document_text", {
+    title: "Save chat text as a document",
+    description: "Save text from this chat (for example an email the user pasted) as a document on the RFQ, so prices read from it link back to it. Returns a documentId to pass to submit_quote.",
+    inputSchema: {
+      rfx: RFX, filename: z.string().describe("A short name, e.g. helios-email-17-sep.txt"), text: z.string(),
+      supplier: z.string().optional(), kind: z.enum(["quotation", "questionnaire", "certificate", "other"]).optional(),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("save_document_text", args, async (ctx) => {
+    const r = await saveTextDocumentAction(ctx, args.rfx, { filename: args.filename, text: args.text, supplierRef: args.supplier, kind: args.kind });
+    return `Saved as document ${r.doc.id} (${r.doc.filename}) on ${r.rfx.code}. Pass documentId "${r.doc.id}" when you submit what you read from it.`;
+  }));
+
+  const PROVENANCE = z.object({
+    locator: z.string().describe("Excel 'Sheet!G14', PDF 'p2 L14', Word 'para 7', email 'body line 4', photo 'bbox x0,y0,x1,y1'."),
+    citedText: z.string().describe("The supplier's exact text for this value. Never empty."),
+    method: z.enum(["xlsx_cell", "pdf_text", "docx_prose", "email_text", "vision_bbox", "other"]),
+    page: z.number().int().positive().nullish(),
+  });
+  const ROW = z.object({
+    rfxLineNo: z.number().int().positive().nullable().describe("The RFQ line this matches, or null if none. Do not match it to the nearest line."),
+    vendorDescription: z.string().describe("How the supplier described the item."),
+    status: z.enum(RAW_STATUSES).describe("quoted | substituted (different make) | downgraded (lower spec) | uom_mismatch | bundled | moq_adjusted | relative (refers to a previous order) | match_rival | illegible | not_quoted (explicit decline). Use illegible rather than guessing."),
+    price: z.number().nullish().describe("As written, in the supplier's unit and currency. Do not convert, multiply by pack size or apply discounts."),
+    uom: z.string().nullish().describe("The unit they priced in, in their words: 'per pc', 'box of 10', 'per DIMM'."),
+    currency: z.string().nullish().describe("ISO code, INR or USD..."),
+    qty: z.number().int().nullish().describe("Quantity the supplier quoted, if different from the RFQ."),
+    printedPrice: z.number().nullish().describe("A printed price crossed out and replaced by hand."),
+    handwritten: z.boolean().nullish(),
+    offeredMakeModel: z.string().nullish(),
+    note: z.string().nullish().describe("MOQs, free goods, warranty scope, conditions, 'ex-works'."),
+    scopeUpliftRef: z.string().nullish().describe("If this price excludes something the RFQ asked for, which the supplier priced on another of their lines, that line's label (e.g. '30A')."),
+    scopeUpliftNote: z.string().nullish(),
+    reference: z.object({
+      basis: z.enum(["prior_po", "prior_po_uplift", "match_rival", "other"]),
+      refSku: z.string().nullish(), upliftPct: z.number().nullish(), rival: z.string().nullish(),
+    }).nullish().describe("Only when the price refers to another price instead of stating one."),
+    confidence: z.number().min(0).max(1).describe("Your confidence that you read it correctly."),
+    provenance: PROVENANCE,
+  });
+
+  server.registerTool("submit_quote", {
+    title: "Submit a quote",
+    description: "Store what you read from one supplier quote: one row per item, each with the price exactly as written and the supplier's text. Bidline validates it, converts units and currency, calculates landed prices, and updates the comparison and the app. Returns the result for each line and what needs review.",
+    inputSchema: {
+      rfx: RFX,
+      supplier: z.string().describe("Supplier code (V2), name, or id. A name not on the RFQ is added as a new supplier."),
+      documentId: z.string().optional().describe("The document you read, from list_documents or save_document_text. Leave out only if the user attached the file in chat and there is no stored copy."),
+      vendorRef: z.string().nullish().describe("The supplier's quote number."),
+      supersedesRef: z.string().nullish().describe("If this replaces an earlier quote, that quote's number."),
+      revisionNote: z.string().nullish(),
+      rows: z.array(ROW),
+      blanketFallback: z.object({
+        status: z.enum(RAW_STATUSES), note: z.string(), rival: z.string().nullish(), provenance: PROVENANCE,
+      }).nullish().describe("One statement that covers every line the supplier did not price individually, e.g. 'rest we will match Zenith'."),
+      terms: z.object({
+        gst: z.string().nullish(), freight: z.string().nullish(), payment: z.string().nullish(),
+        validity: z.string().nullish(), delivery: z.string().nullish(),
+        fxReference: z.number().nullish().describe("An exchange rate the supplier states for their own conversion."),
+        fxNote: z.string().nullish(),
+        totalLevelDiscountPercent: z.number().nullish().describe("A discount on the grand total only."),
+        notes: z.string().nullish(),
+      }).nullish(),
+      conditionalDiscounts: z.array(z.object({
+        percent: z.number().nullish(), amountInr: z.number().nullish(), scope: z.string(), condition: z.string(), provenance: PROVENANCE,
+      })).nullish(),
+      statedTotal: z.object({ amount: z.number().nullish(), currency: z.string().nullish(), basis: z.string().nullish() }).nullish(),
+      unreadableRegions: z.array(z.string()).nullish(),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("submit_quote", args, async (ctx) => {
+    const { rfx: rfxRef, supplier, documentId, user_request: _u, ...extraction } = args;
+    void _u;
+    const r = await submitQuoteAction(ctx, { rfx: rfxRef, supplier, documentId, extraction });
+    const code = r.supplier.code;
+    const counts: Record<string, number> = {};
+    for (const l of r.cmp.lines) {
+      const s = r.cmp.matrix[code]?.[l.no]?.status ?? "not_read";
+      counts[s] = (counts[s] ?? 0) + 1;
+    }
+    const attention = r.cmp.lines
+      .map((l) => ({ l, c: r.cmp.matrix[code]?.[l.no] }))
+      .filter(({ c }) => c && ["needs_review", "unreadable", "unresolvable", "resolved_from_reference", "non_comparable"].includes(c.status))
+      .map(({ l, c }) => `- L${l.no}: ${statusWords(c!.status)}. ${c!.flags[0] ?? ""}`);
+    const single = r.cmp.supplierInfo[code].single;
+    return [
+      `Stored ${r.cells} line${r.cells === 1 ? "" : "s"} from ${code} ${r.supplier.name}${r.revision > 1 ? ` as revision ${r.revision}` : ""}${r.unmapped ? `, plus ${r.unmapped} item${r.unmapped === 1 ? "" : "s"} with no matching RFQ line (listed separately, not matched to a line)` : ""}.`,
+      r.issues.length ? `Validation changed ${r.issues.length} row${r.issues.length === 1 ? "" : "s"}:\n${r.issues.map((i) => `- row ${i.rowIndex + 1}: ${i.reason}`).join("\n")}` : "",
+      ...r.fxNotes,
+      `Line results: ${Object.entries(counts).map(([k, v]) => `${v} ${statusWords(k)}`).join(", ")}.`,
+      `Total of comparable lines: ${inr(single.totalInr)} (${single.linesPriced}/${r.cmp.lines.length} lines).`,
+      attention.length ? `Needs review:\n${attention.slice(0, 15).join("\n")}` : "",
+      `Updated in the app: ${appUrl}/rfx/${r.rfx.id}`,
+    ].filter(Boolean).join("\n");
+  }));
+
+  server.registerTool("submit_questionnaire", {
+    title: "Submit questionnaire answers and evidence",
+    description: "Store a supplier's questionnaire answers and what their supporting documents say. Facts only: Bidline decides pass, fail or not assessed (for example, an expired certificate or the wrong version of a standard fails). Answers are merged with earlier ones for the same supplier.",
+    inputSchema: {
+      rfx: RFX,
+      supplier: z.string(),
+      documentId: z.string().optional(),
+      answers: z.array(z.object({
+        questionNo: z.string().describe("e.g. Q2"),
+        answer: z.string().nullish().describe("The supplier's answer, exactly as written. Null if this document is only a supporting document."),
+        attachedDocument: z.string().nullish().describe("The document the supplier says they attached, as they name it."),
+        evidence: z.object({
+          standard: z.string().nullish().describe("Standard named on the document, e.g. ISO/IEC 27001:2013."),
+          validUntil: z.string().nullish().describe("Expiry date, YYYY-MM-DD."),
+          issuedTo: z.string().nullish(),
+          summary: z.string().nullish(),
+        }).nullish(),
+        confidence: z.number().min(0).max(1).optional(),
+      })).min(1),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("submit_questionnaire", args, async (ctx) => {
+    const r = await submitQuestionnaireAction(ctx, {
+      rfx: args.rfx, supplier: args.supplier, documentId: args.documentId,
+      answers: args.answers.map((a) => ({
+        questionNo: a.questionNo, answer: a.answer ?? null, attachedDocument: a.attachedDocument ?? null,
+        evidence: a.evidence ? { standard: a.evidence.standard ?? null, validUntil: a.evidence.validUntil ?? null, issuedTo: a.evidence.issuedTo ?? null, summary: a.evidence.summary ?? null } : null,
+        confidence: a.confidence ?? 0.8,
+      })),
+    });
+    const v = r.verdict;
+    return [
+      `${r.supplier.code} ${r.supplier.name}: ${v.qualified ? "Qualified" : v.assessed ? `Not qualified (failed mandatory ${v.failedMandatory.join(", ")})` : "Not assessed"}.`,
+      ...v.assessments.map((a) => `- ${a.questionNo}${a.mandatory ? " (M)" : ""}: ${a.status.replace(/_/g, " ")}. ${a.why}`),
+    ].join("\n");
+  }));
+
+  server.registerTool("submit_second_read", {
+    title: "Second read of prices from a photo",
+    description: "For a photo or hard-to-read document: read the largest prices again, separately, and submit them. If the second read disagrees with the first, Bidline excludes that price from all totals until the buyer reviews it.",
+    inputSchema: {
+      rfx: RFX, supplier: z.string(),
+      readings: z.array(z.object({ lineNo: z.number().int(), price: z.number().nullable().describe("What you read this time, or null if unreadable.") })).min(1),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("submit_second_read", args, async (ctx) => {
+    const r = await submitSecondReadAction(ctx, args);
+    return r.results.map((x) => `L${x.lineNo}: first ${x.first ?? "none"}, second ${x.second ?? "unreadable"}: ${x.agreed ? "agree" : "DISAGREE, excluded from totals until reviewed"}`).join("\n") || "No matching prices.";
+  }));
+
+  // -------------------------------------------------------------------------
+  // Analysis (read-only): every number comes from Bidline's calculator
+  // -------------------------------------------------------------------------
+
+  server.registerTool("get_comparison", {
+    title: "Comparison",
+    description: "Suppliers, coverage, qualification, headline award options and, optionally, the landed unit price grid for selected lines or suppliers. Bidline calculates every figure: quote them, do not recalculate.",
+    inputSchema: {
+      rfx: RFX,
+      includeGrid: z.boolean().optional().describe("Include the line-by-supplier grid of landed unit prices."),
+      lines: z.array(z.number().int()).optional(),
+      suppliers: z.array(z.string()).optional().describe("Supplier codes to include in the grid."),
+      user_request: USER_REQUEST,
+    },
+    annotations: ro,
+  }, async (args) => run("get_comparison", args, async () => {
+    const rfx = await resolveRfx(user.id, args.rfx);
+    const cmp = await loadComparison(rfx);
+    const out = [overview(cmp, appUrl)];
+    if (args.includeGrid || args.lines?.length || args.suppliers?.length) out.push("", gridText(cmp, { lines: args.lines, suppliers: args.suppliers }));
+    return out.join("\n");
+  }, { query: "Viewed the comparison.", rfx: args.rfx ?? "" }));
+
+  server.registerTool("get_line", {
+    title: "One line item across suppliers",
+    description: "One RFQ line item: each supplier's landed unit price, what they quoted, flags and the source of each price.",
+    inputSchema: { rfx: RFX, lineNo: z.number().int(), user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("get_line", args, async () => {
+    const cmp = await loadComparison(await resolveRfx(user.id, args.rfx));
+    return lineText(cmp, args.lineNo);
+  }, { query: `Viewed line ${args.lineNo}.`, rfx: args.rfx ?? "" }));
+
+  server.registerTool("explain_cell", {
+    title: "Explain one price",
+    description: "For one supplier and line: what the supplier quoted and where, each step from the quoted price to the landed unit price, any edit and its reason, and the change history.",
+    inputSchema: { rfx: RFX, supplier: z.string(), lineNo: z.number().int(), user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("explain_cell", args, async () => {
+    const rfx = await resolveRfx(user.id, args.rfx);
+    const s = await resolveSupplier(rfx.id, args.supplier);
+    const cmp = await loadComparison(rfx);
+    const key = cellKey(s.code, args.lineNo);
+    const history = await q<{ created_at: string; actor: string; summary: string }>(
+      `select created_at::text, actor, summary from events where rfx_id = $1 and (detail->>'cell' = $2 or (kind in ('quote_read','second_read') and summary like $3)) order by id desc limit 20`,
+      [rfx.id, key, `%${s.code} %`],
+    );
+    return cellText(cmp, s.code, args.lineNo, history);
+  }, { query: `Asked how ${args.supplier} line ${args.lineNo} was calculated.`, rfx: args.rfx ?? "" }));
+
+  server.registerTool("get_supplier", {
+    title: "One supplier",
+    description: "One supplier: contact, quote reference, totals and stated discount, terms, conditional discounts, questionnaire result by question, open follow-up items and follow-up history.",
+    inputSchema: { rfx: RFX, supplier: z.string(), user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("get_supplier", args, async () => {
+    const rfx = await resolveRfx(user.id, args.rfx);
+    const s = await resolveSupplier(rfx.id, args.supplier);
+    return supplierText(await loadComparison(rfx), s.code);
+  }, { query: `Viewed supplier ${args.supplier}.`, rfx: args.rfx ?? "" }));
+
+  server.registerTool("list_needs_attention", {
+    title: "What needs review",
+    description: "Everything excluded from totals or worth checking: prices where two reads disagree, unreadable prices, low-confidence reads, prices taken from previous POs, items with no matching RFQ line, unclear line items and unread documents.",
+    inputSchema: { rfx: RFX, user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("list_needs_attention", args, async () => {
+    return needsAttentionText(await loadComparison(await resolveRfx(user.id, args.rfx)));
+  }, { query: "Asked what needs review.", rfx: args.rfx ?? "" }));
+
+  server.registerTool("compare_award_options", {
+    title: "Award options",
+    description: "Every award option Bidline can price: lowest price per line across all suppliers, across qualified suppliers only, and all lines to each single supplier (with their stated discount where it applies). Also the like-for-like totals when options cover different lines, and the premium for qualified suppliers.",
+    inputSchema: { rfx: RFX, user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("compare_award_options", args, async () => {
+    const cmp = await loadComparison(await resolveRfx(user.id, args.rfx));
+    const c = cmp.compliance;
+    const out = [
+      `Award options for ${cmp.rfx.code} (INR, ex-GST, landed):`,
+      `- Cheapest per line, all suppliers: ${inr(c.naive.totalInr)} on ${c.naive.linesAwarded}/${cmp.lines.length} lines${c.naive.unfilledLines.length ? `; no comparable price for ${c.naive.unfilledLines.join(", ")}` : ""}.`,
+      `- Cheapest per line, qualified suppliers only (${c.qualifiedVendors.join(", ") || "none qualified yet"}): ${inr(c.compliant.totalInr)} on ${c.compliant.linesAwarded}/${cmp.lines.length} lines.`,
+      `- Premium for qualified suppliers (qualified total minus all-supplier total): ${inr(c.deltaInr)} (${c.deltaPct.toFixed(1)}%).`,
+    ];
+    if (c.likeForLike.warning) {
+      out.push(`- WARNING: ${c.likeForLike.warning}`);
+      for (const s of c.likeForLike.scenarios) out.push(`  ${s.label}: ${inr(s.likeForLikeTotalInr)} on the ${c.likeForLike.linesInCommonBasis} lines quoted by both.`);
+    }
+    out.push("", "All lines to one supplier:");
+    for (const s of cmp.suppliers) {
+      const x = cmp.supplierInfo[s.code].single;
+      out.push(`- ${s.code} ${s.name}: ${inr(x.totalInr)} on ${x.linesPriced}/${cmp.lines.length} lines${x.complete ? " (complete)" : `, missing ${x.missingLines.length}`}` +
+        `${x.totalLevelDiscountPct ? `; stated discount ${x.totalLevelDiscountPct}% ${x.totalLevelDiscountApplied ? `applied: ${inr(x.totalAfterStatedDiscountInr)}` : "not applied because the quote does not cover all lines"}` : ""}.`);
+    }
+    return out.join("\n");
+  }, { query: "Compared award options.", rfx: args.rfx ?? "" }));
+
+  server.registerTool("what_if", {
+    title: "What if",
+    description: "Price a scenario without saving it: exclude suppliers, use a different exchange rate, include prices taken from previous POs, exclude off-spec or conditional offers, or limit to some lines. Returns the lowest-price-per-line award under those conditions next to the current one.",
+    inputSchema: {
+      rfx: RFX,
+      excludeSuppliers: z.array(z.string()).optional(),
+      onlySuppliers: z.array(z.string()).optional(),
+      fxRates: z.record(z.string(), z.number()).optional().describe("e.g. {USD: 90}"),
+      includeUnconfirmed: z.boolean().optional(),
+      excludeCaveats: z.boolean().optional(),
+      lines: z.array(z.number().int()).optional(),
+      user_request: USER_REQUEST,
+    },
+    annotations: ro,
+  }, async (args) => run("what_if", args, async () => {
+    const cmp = await loadComparison(await resolveRfx(user.id, args.rfx));
+    const codes = new Set(cmp.suppliers.map((s) => s.code));
+    const resolveCodes = async (list?: string[]) => Promise.all((list ?? []).map(async (x) => (await resolveSupplier(cmp.rfx.id, x)).code));
+    const only = await resolveCodes(args.onlySuppliers);
+    const excl = await resolveCodes(args.excludeSuppliers);
+    const pool = [...codes].filter((c) => (!only.length || only.includes(c)) && !excl.includes(c));
+    let matrix = cmp.matrix;
+    let ctx = cmp.ctx;
+    const changes: string[] = [];
+    if (args.fxRates && Object.keys(args.fxRates).length) {
+      const fx = { ...cmp.rules.fx };
+      for (const [k, v] of Object.entries(args.fxRates)) fx[k.toUpperCase()] = { rate: v, source: "what-if rate, not saved" };
+      const alt = await loadComparison(cmp.rfx, { rules: { ...cmp.rules, fx } });
+      matrix = alt.matrix;
+      ctx = alt.ctx;
+      changes.push(`exchange rates ${JSON.stringify(args.fxRates)}`);
+    }
+    if (args.lines?.length) {
+      ctx = { ...ctx, lines: ctx.lines.filter((l) => args.lines!.includes(l.no)) };
+      changes.push(`lines ${args.lines.join(", ")} only`);
+    }
+    if (excl.length) changes.push(`without ${excl.join(", ")}`);
+    if (only.length) changes.push(`only ${only.join(", ")}`);
+    if (args.includeUnconfirmed) changes.push("including prices taken from previous POs");
+    if (args.excludeCaveats) changes.push("excluding off-spec or conditional offers");
+    const base = cheapestPerLine(cmp.matrix, [...codes], { ctx: { ...cmp.ctx, lines: ctx.lines }, label: "Current, cheapest per line" });
+    const alt = cheapestPerLine(matrix, pool, { ctx, includeUnconfirmed: args.includeUnconfirmed, excludeCaveats: args.excludeCaveats, label: `What if: ${changes.join("; ") || "no change"}` });
+    const lfl = likeForLike([base, alt]);
+    const winners = (s: typeof alt) => {
+      const by: Record<string, number> = {};
+      for (const p of Object.values(s.picks)) by[p.vendor] = (by[p.vendor] ?? 0) + p.extendedInr;
+      return Object.entries(by).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${inr(v)}`).join(", ");
+    };
+    return [
+      `${base.label}: ${inr(base.totalInr)} on ${base.linesAwarded} lines (${winners(base)}).`,
+      `${alt.label}: ${inr(alt.totalInr)} on ${alt.linesAwarded} lines (${winners(alt)}).`,
+      `Difference: ${inr(alt.totalInr - base.totalInr)}.`,
+      lfl.warning ? `Warning: ${lfl.warning}` : "",
+      "Nothing was saved. Use set_fx_rate or the other tools to make a permanent change.",
+    ].filter(Boolean).join("\n");
+  }, { query: "Ran a what-if scenario.", rfx: args.rfx ?? "" }));
+
+  // -------------------------------------------------------------------------
+  // Changes
+  // -------------------------------------------------------------------------
+
+  server.registerTool("correct_price", {
+    title: "Edit one price",
+    description: "Edit what was read for one supplier and line (price, unit, currency or status), with a reason. The original value is kept and shown next to the edit. Set undo to true to remove an edit.",
+    inputSchema: {
+      rfx: RFX, supplier: z.string(), lineNo: z.number().int(),
+      price: z.number().nullish(), uom: z.string().nullish(), currency: z.string().nullish(),
+      status: z.enum(["quoted", "substituted", "downgraded", "uom_mismatch", "not_quoted", "illegible", "omitted", "match_rival", "relative"]).nullish(),
+      note: z.string().nullish(),
+      reason: z.string().describe("Reason for the edit. Shown on the price and in the award note."),
+      undo: z.boolean().optional(),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("correct_price", args, async (ctx) => {
+    if (args.undo) {
+      const r = await clearCorrectionAction(ctx, { rfx: args.rfx, supplier: args.supplier, lineNo: args.lineNo, reason: args.reason });
+      return `Removed the edit on line ${args.lineNo} for ${r.supplier.name}. The original value applies again.`;
+    }
+    const r = await correctCellAction(ctx, { ...args });
+    const b = r.before, a = r.after;
+    return `Line ${args.lineNo} for ${r.supplier.code} ${r.supplier.name}: ${b?.unitInr !== null && b?.unitInr !== undefined ? inr(b.unitInr) : statusWords(b?.status ?? "not_read")} -> ${a?.unitInr !== null && a?.unitInr !== undefined ? inr(a.unitInr) : statusWords(a?.status ?? "")} per ${r.line.uom}. Reason recorded. The app and all totals are updated.`;
+  }));
+
+  server.registerTool("set_fx_rate", {
+    title: "Set an exchange rate",
+    description: "Set the exchange rate used to convert a currency to INR, with its source. All prices in that currency are recalculated.",
+    inputSchema: { rfx: RFX, currency: z.string(), rate: z.number().positive(), source: z.string().describe("Where the rate comes from, e.g. 'RBI reference rate 18 Sep 2026'."), user_request: USER_REQUEST },
+    annotations: rw,
+  }, async (args) => run("set_fx_rate", args, async (ctx) => {
+    await setFxRateAction(ctx, args);
+    return `${args.currency.toUpperCase()} exchange rate set to ${args.rate} (${args.source}). All prices in ${args.currency.toUpperCase()} are recalculated.`;
+  }));
+
+  server.registerTool("add_unit_rule", {
+    title: "Add a unit conversion",
+    description: "Tell Bidline how a supplier's unit of measure relates to the RFQ unit. Factor 1 means the same unit under another name (e.g. 'nos' = 'each'). Any other factor converts, e.g. one RFQ 'kit' = 2 x 'per DIMM'.",
+    inputSchema: {
+      rfx: RFX, fromUom: z.string().describe("The supplier's unit, e.g. 'per DIMM'."), toUom: z.string().describe("The unit on the RFQ line, e.g. 'kit'."),
+      factor: z.number().positive().describe("How many of fromUom make one toUom."), basis: z.string().describe("Reason, e.g. 'one kit = two 16GB DIMMs per the line spec'."),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("add_unit_rule", args, async (ctx) => {
+    if (args.factor === 1) {
+      await addUnitAliasAction(ctx, { rfx: args.rfx, askedUom: args.toUom, alias: args.fromUom });
+      return `'${args.fromUom}' now counts as the same unit as '${args.toUom}'. Prices updated.`;
+    }
+    await addUnitRuleAction(ctx, args);
+    return `One '${args.toUom}' = ${args.factor} x '${args.fromUom}'. Prices updated.`;
+  }));
+
+  server.registerTool("set_prior_po_rates", {
+    title: "Record previous PO rates",
+    description: "Record rates from the buyer's earlier purchase order, so a supplier's 'same as last time' or '6% over last year' can be priced. Rates are per RFQ SKU, in INR per RFQ unit.",
+    inputSchema: {
+      rfx: RFX, poNumber: z.string(), poDate: z.string(), vendor: z.string(),
+      rates: z.record(z.string(), z.number()).describe("SKU to INR rate, e.g. {'MON-24': 10100}"),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("set_prior_po_rates", args, async (ctx) => {
+    await setPriorPoAction(ctx, args);
+    return `Recorded ${Object.keys(args.rates).length} rate${Object.keys(args.rates).length === 1 ? "" : "s"} from ${args.poNumber}. Prices that refer to them are now calculated. The supplier must still confirm them before award.`;
+  }));
+
+  server.registerTool("record_assumption", {
+    title: "Record an assumption",
+    description: "Record an assumption on the RFQ (e.g. how GST or freight is treated), with its source. Shown to the buyer and in the award note.",
+    inputSchema: { rfx: RFX, key: z.string(), value: z.string(), source: z.string(), note: z.string().optional(), user_request: USER_REQUEST },
+    annotations: rw,
+  }, async (args) => run("record_assumption", args, async (ctx) => {
+    await noteAssumptionAction(ctx, args);
+    return `Recorded '${args.key}'.`;
+  }));
+
+  server.registerTool("resolve_unmatched_item", {
+    title: "Match or exclude an unmatched item",
+    description: "Decide what to do with an item a supplier quoted that matches no RFQ line (ids from list_needs_attention): match it to a line, or exclude it, with a reason.",
+    inputSchema: { rfx: RFX, itemId: z.string(), lineNo: z.number().int().optional(), dismiss: z.boolean().optional(), reason: z.string(), user_request: USER_REQUEST },
+    annotations: rw,
+  }, async (args) => run("resolve_unmatched_item", args, async (ctx) => {
+    await resolveUnmappedAction(ctx, args);
+    return args.dismiss || !args.lineNo ? "Excluded and recorded." : `Matched to line ${args.lineNo} as an edit, with your reason.`;
+  }));
+
+  // -------------------------------------------------------------------------
+  // Chasing suppliers
+  // -------------------------------------------------------------------------
+
+  server.registerTool("get_chase_list", {
+    title: "Open follow-up items",
+    description: "For each supplier (or one): every missing item (prices, questionnaire answers, certificates, commercial terms) and every discrepancy (unreadable prices or prices taken from previous POs), with the value at stake, and what Bidline resolved without asking.",
+    inputSchema: { rfx: RFX, supplier: z.string().optional(), user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("get_chase_list", args, async () => {
+    const rfx = await resolveRfx(user.id, args.rfx);
+    const cmp = await loadComparison(rfx);
+    const codes = args.supplier ? [(await resolveSupplier(rfx.id, args.supplier)).code] : cmp.suppliers.map((s) => s.code);
+    return codes.map((code) => {
+      const g = cmp.supplierInfo[code].gaps;
+      return [
+        `${code} ${g.vendorName}: ${g.gapCount} open item${g.gapCount === 1 ? "" : "s"}, ${g.disputeCount} discrepanc${g.disputeCount === 1 ? "y" : "ies"}, about ${inr(g.totalAtRiskInr)} at stake.${g.lastChase ? ` Last follow-up ${g.lastChase.sentAt.slice(0, 10)}${g.lastChase.answeredAt ? ", answered" : g.lastChase.overdue ? ", overdue" : ", awaiting reply"}.` : ""}`,
+        ...g.items.map((i) => `- [${i.family}] ${i.ask}`),
+        g.resolvedWithoutAsking.length ? `  Resolved by Bidline: ${g.resolvedWithoutAsking.map((r) => `${r.what} (lines ${r.lineNos.join(", ")})`).join("; ")}` : "",
+      ].filter(Boolean).join("\n");
+    }).join("\n\n");
+  }, { query: "Asked for open follow-up items.", rfx: args.rfx ?? "" }));
+
+  server.registerTool("record_chase", {
+    title: "Record a follow-up",
+    description: "Record a follow-up to one supplier for missing items, with a due date. Bidline drafts the message from the open items unless you provide your own. Bidline records it but does not send it: give the user the message to send.",
+    inputSchema: {
+      rfx: RFX, supplier: z.string(), dueDate: z.string().optional().describe("YYYY-MM-DD, default 3 days."),
+      message: z.string().optional().describe("Your own wording. Leave out to use Bidline's draft."),
+      onlyLines: z.array(z.number().int()).optional(), onlyQuestions: z.array(z.string()).optional(),
+      channel: z.string().optional(),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("record_chase", args, async (ctx) => {
+    const r = await recordChaseAction(ctx, args);
+    return `Recorded a follow-up to ${r.supplier.code} ${r.supplier.name} for ${r.items.length} item${r.items.length === 1 ? "" : "s"}, due ${r.due}. Bidline does not send emails. Here is the message to send:\n\n${r.message}`;
+  }));
+
+  // -------------------------------------------------------------------------
+  // Award and approval
+  // -------------------------------------------------------------------------
+
+  server.registerTool("create_award", {
+    title: "Draft award and request approval",
+    description: "Turn an award option into an award note (all figures from Bidline) with your commentary, and get a link the approver uses to approve, reject or request changes. scenario: cheapest_all, cheapest_qualified, or single_supplier (with supplier).",
+    inputSchema: {
+      rfx: RFX,
+      scenario: z.enum(["cheapest_all", "cheapest_qualified", "single_supplier"]),
+      supplier: z.string().optional(),
+      commentary: z.string().optional().describe("Your recommendation in words. Only use figures from Bidline."),
+      user_request: USER_REQUEST,
+    },
+    annotations: rw,
+  }, async (args) => run("create_award", args, async (ctx) => {
+    const r = await createAwardAction(ctx, args);
+    const s = r.snapshot;
+    return [
+      `Award drafted: ${s.label}. ${inr(s.totalInr)} ex-GST across ${s.linesAwarded}/${s.linesInRfx} lines.`,
+      ...s.bySupplier.map((b) => `- ${b.code} ${b.name}: ${b.lines} lines, ${inr(b.totalInr)}`),
+      s.comparison?.warning ? `Warning included in the note: ${s.comparison.warning}` : "",
+      `Approval link for the approver (no login needed): ${appUrl}/share/${r.token}`,
+      `In the app: ${appUrl}/rfx/${r.rfx.id}?tab=award`,
+    ].filter(Boolean).join("\n");
+  }));
+
+  server.registerTool("get_award_status", {
+    title: "Award and approval status",
+    description: "Awards drafted on an RFQ and whether the approver has approved, rejected or requested changes.",
+    inputSchema: { rfx: RFX, user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("get_award_status", args, async () => {
+    const rfx = await resolveRfx(user.id, args.rfx);
+    const rows = await q<{ scenario_key: string; status: string; decided_by: string | null; decided_at: string | null; decision_note: string | null; share_token: string; created_at: string; snapshot: { totalInr: number; label: string } }>(
+      `select scenario_key, status, decided_by, decided_at::text, decision_note, share_token, created_at::text, snapshot from awards where rfx_id = $1 order by created_at desc`, [rfx.id],
+    );
+    if (!rows.length) return `No award drafted on ${rfx.code} yet.`;
+    return rows.map((a) => `- ${a.created_at.slice(0, 16)} ${a.snapshot.label}, ${inr(a.snapshot.totalInr)}: ${a.status.replace(/_/g, " ")}${a.decided_by ? ` by ${a.decided_by}` : ""}${a.decision_note ? ` ("${a.decision_note}")` : ""}. ${appUrl}/share/${a.share_token}`).join("\n");
+  }, { query: "Checked the award status.", rfx: args.rfx ?? "" }));
+
+  // -------------------------------------------------------------------------
+  // History
+  // -------------------------------------------------------------------------
+
+  server.registerTool("get_activity", {
+    title: "Activity log",
+    description: "Recent activity on an RFQ, newest first: requests made in Claude, actions taken through Bidline's tools, and every edit the buyer made in the app (so you see changes made outside this chat). format 'markdown' returns the full activity log.",
+    inputSchema: {
+      rfx: RFX, limit: z.number().int().positive().max(500).optional(),
+      onlyAppEdits: z.boolean().optional().describe("Only changes made in the app."),
+      format: z.enum(["list", "markdown"]).optional(),
+      user_request: USER_REQUEST,
+    },
+    annotations: ro,
+  }, async (args) => run("get_activity", args, async () => {
+    const rfx = await resolveRfx(user.id, args.rfx);
+    let events = await listEvents({ rfxId: rfx.id, limit: args.format === "markdown" ? 2000 : args.limit ?? 40 });
+    if (args.onlyAppEdits) events = events.filter((e) => e.actor === "user" || e.actor === "approver");
+    if (args.format === "markdown") return transcriptMarkdown({ title: `${rfx.code} ${rfx.title}`, events });
+    if (!events.length) return "No activity yet.";
+    return events.map((e) => `${String(e.created_at).slice(0, 16).replace("T", " ")} | ${e.actor} | ${e.tool ?? e.kind} | ${e.summary}`).join("\n");
+  }));
+
+  return server;
+}
