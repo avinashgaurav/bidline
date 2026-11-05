@@ -21,8 +21,8 @@ Bidline is the system of record around the buyer's own Claude:
 2. Connect Claude. On first sign-in a popup walks you through it and confirms "Claude MCP connected" as soon as Claude reaches Bidline. The link is also on the Connect Claude page.
    - **Claude on the web or desktop:** Settings, then Connectors, then *Add custom connector*. Name it Bidline, paste the link, add. In a chat, switch Bidline on from the tools menu.
    - **Claude Code:** `claude mcp add --transport http bidline <your link>`
-3. Answer one question, "How do you want to start?":
-   - **Use demo data:** loads a fictional IT hardware enquiry with five supplier replies attached and unread.
+3. Answer the first question, "How would you like to start?" (the second asks you to connect Claude):
+   - **Use demo data:** loads three fictional events: an IT hardware RFQ with 12 supplier files waiting for Claude, office furniture already compared and approved, and housekeeping supplies with quotes partly in and a follow-up overdue.
    - **Use my own files:** tell Claude what you are buying (or fill a short form), then upload supplier replies (PDF, Excel, Word, email, photos).
 4. Ask Claude, for example:
    - "Use Bidline: read every unread supplier document on my latest enquiry and submit what each one says."
@@ -68,6 +68,57 @@ Orientation: `get_started`, `list_rfxs`, `list_open_work`, `get_rfx`. Enquiry: `
 
 Every tool accepts an optional `user_request`, the message that led to the call, which is kept in the transcript.
 
+## Architecture
+
+![Bidline architecture](docs/architecture.png)
+
+### Data flow
+
+1. The buyer asks Claude in plain words, for example "Create a sourcing event for 40 chairs and invite Featherline".
+2. Claude calls a Bidline tool over MCP at the buyer's private link. The link identifies the person.
+3. The one action layer (`lib/actions.ts`) checks the person's role, saves to Postgres and writes one sealed audit entry. Every change, from Claude or the app, goes through it.
+4. The web app refreshes by itself within about 10 seconds.
+5. Supplier files are uploaded (or saved by Claude from the chat). Claude reads each file and calls `submit_quote` with every price and the exact words it came from.
+6. Bidline does the maths in code: units, packs, currency, totals, qualification. Doubtful prices are kept out of totals until a person checks them.
+7. A person corrects, follows up and drafts the award. The approver decides on a link or signed in. A daily job sends reminders and expires stale requests.
+
+### Who does what
+
+| Job | Done by |
+|---|---|
+| Reading files, writing in plain words | The customer's own Claude (paid by their Claude plan) |
+| Storing, calculating, rules, audit log, roles, approvals, exports | Bidline |
+| Hosting, file storage, daily job | Vercel (Next.js, Blob, Cron) |
+| Database | Neon Postgres |
+| Follow-up emails | The buyer's own mailbox over SMTP |
+| Paying the supplier after the award (proposed) | Volopay payables, via a purchase-order export |
+
+### Built today, and proposed
+
+| Built and live | Proposed for production |
+|---|---|
+| MCP server with 58 tools (57 on by default; approving an award stays off until an admin switches it on) | Per-user Claude sign-in (OAuth) for Claude Team and Enterprise |
+| Comparison engine, qualification rules, ready-to-send checklist | Gmail and Outlook sign-in that also picks up replies |
+| Workspaces, four roles, invites, restricted events, sealed audit log | WhatsApp follow-ups |
+| Award, approval link, approval steps by value, supplier share limit | Purchase-order export to Tally, Zoho Books, SAP and Volopay |
+| Templates, @mentions, notifications, Slack/Teams/webhook alerts | Live GSTIN status from a GST data provider |
+| Email from the buyer's mailbox, daily reminders | SSO, data kept in India, custom roles |
+
+### Assumptions and limitations
+
+- Customers already pay for a Claude plan with custom connectors (Pro, Max, Team or Enterprise).
+- One connector link per person today; whole-team rollout needs per-user Claude sign-in.
+- Scanned PDFs with no text layer are read by attaching them in the Claude chat; Bidline does no OCR, because that would be AI inside the app.
+- Demo data is fictional, and demo follow-ups go to the buyer's own address.
+- Single region today; data is not yet kept in India.
+
+### Next steps
+
+1. Ten founder-led pilots, measuring time saved per quote round.
+2. Per-user Claude sign-in for team rollouts.
+3. A supplier portal link so suppliers fill in missing prices themselves.
+4. Award to purchase order, then payment.
+
 ## How it is built
 
 | Part | Choice |
@@ -75,8 +126,9 @@ Every tool accepts an optional `user_request`, the message that led to the call,
 | App | Next.js 16 (App Router), React 19, Tailwind 4, shadcn primitives, Mercury-inspired design (`docs/DESIGN.md`) |
 | MCP | `@modelcontextprotocol/sdk`, stateless streamable HTTP at `/mcp/<personal token>`, JSON responses |
 | Data | Neon Postgres (`db/schema.sql`). Raw readings are never overwritten; corrections are a separate layer |
-| Files | Vercel Blob, private store, streamed to the owner only |
-| Auth | Email and password (scrypt), signed session cookie; per-user MCP token that can be replaced |
+| Files | Vercel Blob, private store, served only to members who can open the event |
+| Auth | Email and password (scrypt), signed session cookie, sign-in throttling; workspaces with four roles; per-user MCP token that can be replaced, plus an optional read-only token |
+| Audit | Every change in one `events` table, hash-chained by a database trigger; edits are refused, gaps and changes show |
 | Hosting | Vercel, functions in iad1 next to the database |
 
 ```
@@ -88,6 +140,9 @@ lib/comparison.ts         rebuilds the whole comparison from stored readings and
 lib/actions.ts            every change; used by both the MCP tools and the app
 lib/mcp/server.ts         the MCP tools
 lib/events.ts             the transcript, also the signal the screens poll to stay live
+lib/roles.ts              the four roles and what each may do
+lib/audit*.ts             the audit log queries, labels and the seal check
+lib/approvals.ts          approval steps, separation of duties
 ```
 
 ## Checks
