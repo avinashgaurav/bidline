@@ -165,6 +165,12 @@ async function main() {
     const share = await fetch(`${BASE}/share/${token}`);
     check("approval page loads", share.status === 200, String(share.status));
     await call("get_award_status", { rfx: code });
+    const exp = await call("get_export_link", { rfx: code, format: "xlsx" });
+    const xlsxUrl = /(https?:\/\/\S+\?t=\S+)/.exec(exp)?.[1];
+    const xlsx = xlsxUrl ? await fetch(xlsxUrl) : null;
+    check("export link downloads the Excel workbook without a login", xlsx?.status === 200 && /spreadsheetml/.test(xlsx.headers.get("content-type") ?? ""), String(xlsx?.status));
+    const tampered = xlsxUrl ? await fetch(xlsxUrl.replace("/xlsx?", "/csv?")) : null;
+    check("an export link only works for the file it was made for", tampered?.status === 401);
     const md = await call("get_activity", { rfx: code, format: "markdown" });
     check("transcript records what was asked", /e2e: create_rfx/.test(md) && /Tool `correct_price`/.test(md));
 

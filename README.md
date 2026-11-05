@@ -48,9 +48,9 @@ Bidline is the system of record around the buyer's own Claude:
 | Activity | Every request made in Claude, every tool call, every edit and approval; download as `transcript.md` |
 | Exports | Comparison as Excel (with an audit-trail sheet) or CSV |
 
-## MCP tools (34)
+## MCP tools (35)
 
-Orientation: `get_started`, `list_rfxs`, `get_rfx`. Enquiry: `create_rfx`, `update_rfx`, `upsert_lines`, `add_questions`, `issue_rfx`, `add_suppliers`, `update_supplier`. Reading: `list_documents`, `read_document`, `save_document_text`, `submit_quote`, `submit_questionnaire`, `submit_second_read`. Analysis: `get_comparison`, `get_line`, `explain_cell`, `get_supplier`, `list_needs_attention`, `compare_award_options`, `what_if`. Changes: `correct_price`, `set_fx_rate`, `add_unit_rule`, `set_prior_po_rates`, `record_assumption`, `resolve_unmatched_item`. Chasing: `get_chase_list`, `record_chase`. Award: `create_award`, `get_award_status`. History: `get_activity`.
+Orientation: `get_started`, `list_rfxs`, `get_rfx`. Enquiry: `create_rfx`, `update_rfx`, `upsert_lines`, `add_questions`, `issue_rfx`, `add_suppliers`, `update_supplier`. Reading: `list_documents`, `read_document`, `save_document_text`, `submit_quote`, `submit_questionnaire`, `submit_second_read`. Analysis: `get_comparison`, `get_line`, `explain_cell`, `get_supplier`, `list_needs_attention`, `compare_award_options`, `what_if`. Changes: `correct_price`, `set_fx_rate`, `add_unit_rule`, `set_prior_po_rates`, `record_assumption`, `resolve_unmatched_item`. Follow-ups: `get_chase_list`, `record_chase`. Award: `create_award`, `get_award_status`. Exports and history: `get_export_link` (24-hour download link for the Excel, CSV or activity log), `get_activity`.
 
 Every tool accepts an optional `user_request`, the message that led to the call, which is kept in the transcript.
 

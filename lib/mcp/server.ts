@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { User } from "../auth";
+import { signExport, type User } from "../auth";
 import { q } from "../db";
 import { logEvent, listEvents, transcriptMarkdown } from "../events";
 import {
@@ -836,6 +836,22 @@ export function buildServer(user: User, appUrl: string): McpServer {
   // -------------------------------------------------------------------------
   // History
   // -------------------------------------------------------------------------
+
+  server.registerTool("get_export_link", {
+    title: "Download link for an export",
+    description: "Get a download link, valid for 24 hours and needing no login, for this RFQ's comparison as Excel (with a supplier sheet and an audit-trail sheet) or CSV, or the activity log as Markdown. Give the link to the user.",
+    inputSchema: {
+      rfx: RFX,
+      format: z.enum(["xlsx", "csv", "transcript"]).describe("xlsx = Excel workbook, csv = comparison table, transcript = activity log (.md)"),
+      user_request: USER_REQUEST,
+    },
+    annotations: ro,
+  }, async (args) => run("get_export_link", args, async () => {
+    const rfx = await resolveRfx(user.id, args.rfx);
+    const link = `${appUrl}/api/rfx/${rfx.id}/export/${args.format}?t=${signExport(user.id, rfx.id, args.format)}`;
+    const label = args.format === "xlsx" ? "Excel workbook" : args.format === "csv" ? "CSV file" : "activity log";
+    return `Download the ${label} for ${rfx.code} (link valid for 24 hours): ${link}`;
+  }, { query: `Asked for a ${args.format} export.`, rfx: args.rfx ?? "" }));
 
   server.registerTool("get_activity", {
     title: "Activity log",

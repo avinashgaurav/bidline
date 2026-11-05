@@ -135,3 +135,27 @@ export async function checkLogin(email: string, password: string): Promise<User 
   if (!(await verifyPassword(password, row.password_hash))) return null;
   return { id: row.id, email: row.email, name: row.name, mcp_token: row.mcp_token, last_mcp_at: row.last_mcp_at };
 }
+
+// ---------------------------------------------------------------------------
+// Signed download links: let Claude hand the buyer an export without a login.
+// The link names one RFQ and one file type and expires.
+// ---------------------------------------------------------------------------
+
+export function signExport(userId: string, rfxId: string, kind: string, hours = 24): string {
+  const exp = Date.now() + hours * 3_600_000;
+  const payload = `${userId}.${rfxId}.${kind}.${exp}`;
+  return `${Buffer.from(payload).toString("base64url")}.${sign(`export:${payload}`)}`;
+}
+
+export function verifyExport(token: string, rfxId: string, kind: string): string | null {
+  const [body, sig] = token.split(".");
+  if (!body || !sig) return null;
+  const payload = Buffer.from(body, "base64url").toString();
+  const expected = sign(`export:${payload}`);
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  const [userId, rid, k, exp] = payload.split(".");
+  if (rid !== rfxId || k !== kind || Number(exp) < Date.now()) return null;
+  return userId;
+}

@@ -1,4 +1,4 @@
-import { currentUser } from "@/lib/auth";
+import { currentUser, verifyExport, type User } from "@/lib/auth";
 import { one } from "@/lib/db";
 import { resolveRfx } from "@/lib/rfx";
 import { loadComparison } from "@/lib/comparison";
@@ -8,11 +8,19 @@ import { listEvents, transcriptMarkdown } from "@/lib/events";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Downloads: comparison.csv, comparison.xlsx, transcript.md, award.md (?award=<id>). */
+/**
+ * Downloads: comparison.csv, comparison.xlsx, transcript.md, award.md (?award=<id>).
+ * Signed in, or with a signed link from get_export_link (?t=...).
+ */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string; kind: string }> }) {
-  const user = await currentUser();
-  if (!user) return new Response("Sign in first.", { status: 401 });
   const { id, kind } = await params;
+  const t = new URL(req.url).searchParams.get("t");
+  let user: Pick<User, "id" | "email"> | null = await currentUser();
+  if (!user && t) {
+    const userId = verifyExport(t, id, kind);
+    user = userId ? await one<Pick<User, "id" | "email">>("select id, email from users where id = $1", [userId]) : null;
+  }
+  if (!user) return new Response(t ? "This download link has expired. Ask Claude for a new one." : "Sign in first.", { status: 401 });
   const rfx = await resolveRfx(user.id, id).catch(() => null);
   if (!rfx) return new Response("Not found.", { status: 404 });
   const name = rfx.code.toLowerCase();
