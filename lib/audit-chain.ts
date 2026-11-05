@@ -28,7 +28,7 @@ export async function verifyChain(workspaceId: string): Promise<ChainReport> {
             (select count(*)::int from s where hash is distinct from events_hash(prev_hash, s.*)) as changed,
             (select count(*)::int from s cur left join s before on before.seq = cur.seq - 1
               where cur.seq > (select min(seq) from s) and cur.prev_hash is distinct from before.hash) as missing,
-            (select coalesce(max(seq) - min(seq) + 1 - count(*), 0)::int from s) as gaps,
+            (select coalesce(max(seq) - min(seq) + 1 - count(*), 0)::int + case when min(seq) > 1 then 1 else 0 end from s) as gaps,
             (select hash from s order by seq desc limit 1) as last_hash`,
     [workspaceId],
   );

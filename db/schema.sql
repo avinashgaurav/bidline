@@ -557,7 +557,12 @@ do $do$
 declare r events; prev text; n bigint; ws text := '__none__';
 begin
   if not exists (select 1 from events where seq is null) then return; end if;
+  -- Hold off new entries for the moment this takes, so numbering cannot clash.
+  lock table events in exclusive mode;
   alter table events disable trigger events_no_update_trg;
+  update events e set workspace_id = coalesce((select workspace_id from rfx where id = e.rfx_id), (select workspace_id from users where id = e.user_id))
+    where e.workspace_id is null;
+  update events set seq = null;
   for r in select * from events order by workspace_id nulls first, id loop
     if r.workspace_id is distinct from ws then
       ws := r.workspace_id; prev := null; n := 0;

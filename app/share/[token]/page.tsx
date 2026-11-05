@@ -24,6 +24,8 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   );
   if (!a) notFound();
   const decided = a.status !== "sent";
+  // Old links for a later approval step: those steps are decided signed in to Bidline.
+  const laterStep = await one<{ step: number }>("select step from award_steps where token = $1 and step > 0", [token]);
   return (
     <div className="min-h-screen">
       <header className="bg-night text-on-dark">
@@ -55,10 +57,14 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
                 {a.decision_note ? <p>&ldquo;{a.decision_note}&rdquo;</p> : null}
               </div>
             ) : (
-              <>
-                <p className="eyebrow mb-3">Your decision</p>
-                <DecisionForm token={token} approverName={a.approver?.name ?? ""} />
-              </>
+              laterStep ? (
+                <p className="text-[14px] text-ink-secondary">This approval step is decided signed in to Bidline. <a href="/login" className="text-primary hover:underline">Sign in</a> and open the event&apos;s Award step.</p>
+              ) : (
+                <>
+                  <p className="eyebrow mb-3">Your decision</p>
+                  <DecisionForm token={token} approverName={a.approver?.name ?? ""} />
+                </>
+              )
             )}
           </div>
         </aside>

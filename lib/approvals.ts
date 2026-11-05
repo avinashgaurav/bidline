@@ -65,15 +65,19 @@ export async function decideStep(opts: {
   if (!step) throw new NotFound("This approval link is not valid.");
   if (step.status === "waiting") throw new BadInput(`This award is still with ${steps.find((s) => s.status === "sent")?.name ?? "an earlier approver"}. Your link opens for a decision once they approve.`);
   if (step.status !== "sent") throw new BadInput(`This step was already ${step.status.replace(/_/g, " ")}${step.decided_by ? ` by ${step.decided_by}` : ""}.`);
+  // Later steps are decided signed in to Bidline, so the person is known, not typed.
+  if (step.step > 0 && !opts.decider) throw new BadInput(`Step ${step.step + 1} is decided signed in to Bidline. Sign in and open the event's Award step.`);
   if (opts.decider) {
     // Each step needs a different person. The extra steps an admin set up, when they name an
     // email, are that person's to decide; the first step is open to any approver in the app.
     if (step.step > 0 && step.email && opts.decider.email && step.email.toLowerCase() !== opts.decider.email.toLowerCase()) {
       throw new BadInput(`This step is for ${step.name} (${step.email}). They decide it, signed in or on their link.`);
     }
-    if (steps.some((x) => x.step < step.step && x.decided_by === opts.name)) {
-      throw new BadInput("You already approved an earlier step of this award. A different person must decide this one.");
-    }
+    // The same account cannot decide two steps: checked against the audit trail, by account, not by name.
+    const earlier = await one(
+      `select 1 from events where kind in ('award_step_decided', 'award_decided') and actor = 'user' and user_id = $1 and detail->>'awardId' = $2 limit 1`,
+      [opts.decider.userId, opts.awardId]);
+    if (earlier) throw new BadInput("You already decided an earlier step of this award. A different person must decide this one.");
   }
   const done = await q("update award_steps set status = $2, decided_by = $3, decided_at = now(), note = $4 where id = $1 and status = 'sent' returning id",
     [step.id, opts.decision, opts.name.slice(0, 120), opts.note?.slice(0, 2000) ?? null]);

@@ -88,7 +88,7 @@ export async function AwardTab({ cmp, canEdit, canApprove }: { cmp: Comparison; 
                     <span className="num grid size-5 place-items-center rounded-full bg-card text-[11px]">{x.step + 1}</span>
                     <span className="font-medium">{x.name}</span>{x.above_inr !== null ? <span className="text-ink-secondary">over {inr(Number(x.above_inr))}</span> : null}
                     <span className={`rounded-full px-2 py-px text-[11.5px] capitalize ${STATUS[x.status] ?? "bg-card text-ink-secondary"}`}>{x.status === "sent" ? "Deciding now" : x.status.replace(/_/g, " ")}</span>
-                    {x.step > 0 && x.status === "sent" && (canEdit || canApprove) ? <CopyButton text={`${base}/share/${x.token}`} label="Copy link" /> : null}
+                    {x.step > 0 && x.status === "sent" ? <span className="text-[12px] text-ink-secondary">Decided signed in to Bidline</span> : null}
                   </li>
                 ))}
               </ol>

@@ -74,9 +74,11 @@ export async function removeChannel(userId: string, id: string) {
   await logEvent({ userId, workspaceId: ws, actor: "user", kind: "settings_changed", summary: `Removed the ${gone[0].kind} channel "${gone[0].name}".`, detail: { before: gone[0] } });
 }
 
-const PRIVATE = (ip: string) =>
-  /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip) ||
-  ip === "::1" || /^f[cd]/i.test(ip) || /^fe80/i.test(ip) || ip.startsWith("::ffff:127.") || ip === "::";
+const PRIVATE = (raw: string): boolean => {
+  const ip = raw.replace(/^::ffff:/i, "");
+  return /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|198\.1[89]\.)/.test(ip) || /^64:ff9b:/i.test(ip) ||
+      ip === "::1" || /^f[cd]/i.test(ip) || /^fe80/i.test(ip) || ip === "::";
+};
 
 /** The host must resolve only to public addresses, checked again on every post. */
 async function assertPublic(url: string) {
