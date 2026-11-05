@@ -21,9 +21,9 @@ Bidline is the system of record around the buyer's own Claude:
 2. Connect Claude. On first sign-in a popup walks you through it and confirms "Claude MCP connected" as soon as Claude reaches Bidline. The link is also on the Connect Claude page.
    - **Claude on the web or desktop:** Settings, then Connectors, then *Add custom connector*. Name it Bidline, paste the link, add. In a chat, switch Bidline on from the tools menu.
    - **Claude Code:** `claude mcp add --transport http bidline <your link>`
-3. Choose how to start:
-   - **Demo:** loads a fictional IT hardware enquiry with five supplier replies attached and unread.
-   - **Your own data:** describe what you are buying to Claude, then upload supplier replies (PDF, Excel, Word, email, photos).
+3. Answer one question, "How do you want to start?":
+   - **Use demo data:** loads a fictional IT hardware enquiry with five supplier replies attached and unread.
+   - **Use my own files:** tell Claude what you are buying (or fill a short form), then upload supplier replies (PDF, Excel, Word, email, photos).
 4. Ask Claude, for example:
    - "Use Bidline: read every unread supplier document on my latest enquiry and submit what each one says."
    - "In Bidline, what needs my attention before I can compare these quotes?"
@@ -36,24 +36,27 @@ Bidline is the system of record around the buyer's own Claude:
 
 | Area | What it does |
 |---|---|
-| Sidebar | Sourcing events (with the open event's steps), Ask Claude, Connect Claude, Docs, Settings, sign out |
+| Sidebar | Sourcing events, Ask Claude, Connect Claude, Docs, Settings, sign out |
+| Event page | Steps as tabs with counts, a "Next" banner that says what to do now, Export menu, Duplicate, Audit trail panel |
+| Overview | Charts from the same figures as the grid: price against budget, lines won, quote quality, spend by category (each with a table view) |
+| Audit trail | Side panel: every change on the event, who made it (Claude, the buyer, the approver), when, and the before and after values. Read-only |
 | Ask | Instant answers worked out in code (cheapest, savings against budget, price differences, categories, qualification, what is owed, a line, a supplier); anything else is handed to your Claude |
 | Settings | Profile; your own mailbox for supplier follow-ups (SMTP with an app password, checked before saving, stored encrypted); Claude link; defaults |
 | Comparison | Line by supplier grid of landed prices per asked unit. Lowest comparable price highlighted; caveats, prices needing a person and missing prices marked without relying on colour alone |
 | Cell drawer | Supplier's words, document and location, each conversion step, flags, correction with reason, undo, history |
 | Documents | Drag and drop supplier files; assign supplier and kind; open the original |
-| Lines | Edit what Claude created: items, units, pack sizes, quantities, budgets. Vague lines are flagged before issuing |
+| Lines | Edit what Claude created: items, units, pack sizes, quantities, budgets. Vague lines are flagged before issuing. Notes on any line |
 | Suppliers | Contacts, status, terms as read, stated totals, conditional offers |
-| Questionnaire | Pass, fail or not assessed per question, with the sentence that decided it |
+| Questionnaire | Pass, fail or not assessed per question, with the sentence that decided it. Remove a question with a reason |
 | Follow-ups | What each supplier still owes and the value affected; an editable draft you email from your own mailbox, or record without sending |
-| Award | Award options with like-for-like restatement; award note and approval link |
+| Award | Award options with like-for-like restatement; award note and approval link; withdraw an award awaiting approval |
 | Rules & items | Exchange rates, unit rules, prior-order rates, items that match no line |
 | Activity | Every request made in Claude, every tool call, every edit and approval; download as `transcript.md` |
 | Exports | Comparison as Excel (with an audit-trail sheet) or CSV |
 
-## MCP tools (38)
+## MCP tools (44)
 
-Orientation: `get_started`, `list_rfxs`, `get_rfx`. Enquiry: `create_rfx`, `update_rfx`, `upsert_lines`, `add_questions`, `issue_rfx`, `add_suppliers`, `update_supplier`. Reading: `list_documents`, `read_document`, `save_document_text`, `submit_quote`, `submit_questionnaire`, `submit_second_read`. Analysis: `get_comparison`, `get_line`, `explain_cell`, `get_supplier`, `list_needs_attention`, `compare_award_options`, `what_if`. Changes: `correct_price`, `set_fx_rate`, `add_unit_rule`, `set_prior_po_rates`, `record_assumption`, `resolve_unmatched_item`. Follow-ups: `get_chase_list`, `email_supplier` (draft, or send from the buyer's connected mailbox), `record_chase`, `update_follow_up`. Documents also: `update_document`. Award: `create_award`, `get_award_status`. Exports and history: `get_export_link` (24-hour download link for the Excel, CSV or activity log), `get_activity`.
+Orientation: `get_started`, `list_rfxs`, `list_open_work`, `get_rfx`. Enquiry: `create_rfx`, `duplicate_rfx`, `update_rfx`, `upsert_lines`, `add_line_note`, `add_questions`, `remove_questions`, `issue_rfx`, `add_suppliers`, `update_supplier`. Reading: `list_documents`, `read_document`, `save_document_text`, `submit_quote`, `submit_questionnaire`, `submit_second_read`. Analysis: `get_comparison`, `get_line`, `explain_cell`, `get_supplier`, `list_needs_attention`, `compare_award_options`, `what_if`, `price_history`. Changes: `correct_price`, `set_fx_rate`, `add_unit_rule`, `set_prior_po_rates`, `record_assumption`, `resolve_unmatched_item`. Follow-ups: `get_chase_list`, `email_supplier` (draft, or send from the buyer's connected mailbox), `record_chase`, `update_follow_up`. Documents also: `update_document`. Award: `create_award`, `withdraw_award`, `get_award_status`. Exports and history: `get_export_link` (24-hour download link for the Excel, CSV or activity log), `get_activity`.
 
 Every tool accepts an optional `user_request`, the message that led to the call, which is kept in the transcript.
 
@@ -97,4 +100,5 @@ npm run test:mcp      # end-to-end through MCP and the database (needs a running
 - On Claude Team and Enterprise, one connector link maps to one Bidline account; per-user sign-in (OAuth) is next.
 - A scanned PDF with no text layer is read by attaching it in the Claude chat; Bidline does no OCR because that would be AI inside the app.
 - One buyer per workspace for now; teams come next.
+- Sign-in is throttled: 5 failed attempts per email, or 30 per network address, in 15 minutes.
 - All demo companies, people and prices are fictional.

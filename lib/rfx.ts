@@ -296,7 +296,9 @@ export async function removeLines(rfxId: string, nos: number[]) {
 
 export async function upsertQuestions(rfxId: string, qs: QuestionInput[]) {
   const existing = await getQuestions(rfxId);
-  let n = existing.length;
+  // Number new questions after the highest one, so a removed Q3 never lets a
+  // new question take an existing number and overwrite it.
+  let n = existing.reduce((m, x) => Math.max(m, Number(x.no.replace(/\D/g, "")) || 0), 0);
   for (const item of qs) {
     n += item.no ? 0 : 1;
     const no = item.no?.trim() || `Q${n}`;

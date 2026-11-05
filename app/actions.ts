@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { refresh } from "next/cache";
 import { headers } from "next/headers";
 import {
-  checkLogin, clearLoginFailures, createUser, endSession, loginBlocked, newMcpToken, normaliseEmail, recordLoginFailure, requireUser, startSession,
+  checkLogin, clearLoginFailures, createUser, endSession, newMcpToken, normaliseEmail, recordLoginAttempt, requireUser, startSession,
 } from "@/lib/auth";
 import { one, q } from "@/lib/db";
 import { logEvent } from "@/lib/events";
@@ -52,13 +52,13 @@ export async function loginAction(_: FormState, f: FormData): Promise<FormState>
   const email = str(f, "email");
   const password = String(f.get("password") ?? "");
   if (!email || !password) return { error: "Enter your email and password." };
-  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
-  if (await loginBlocked(email, ip)) return { error: "Too many failed attempts. Wait 15 minutes and try again." };
+  // Vercel sets x-vercel-forwarded-for itself; elsewhere there may be no
+  // trustworthy address, and then only the per-email limit applies.
+  const h = await headers();
+  const ip = h.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip")?.trim() || null;
+  if (await recordLoginAttempt(email, ip)) return { error: "Too many sign-in attempts. Wait 15 minutes and try again." };
   const user = await checkLogin(email, password);
-  if (!user) {
-    await recordLoginFailure(email, ip);
-    return { error: "Incorrect email or password." };
-  }
+  if (!user) return { error: "Incorrect email or password." };
   await clearLoginFailures(email);
   await startSession(user.id);
   await logEvent({ userId: user.id, actor: "user", kind: "login", summary: `Signed in as ${user.email}.` });

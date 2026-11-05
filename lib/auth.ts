@@ -137,29 +137,32 @@ export async function checkLogin(email: string, password: string): Promise<User 
 }
 
 // ---------------------------------------------------------------------------
-// Sign-in throttle: 5 failures per email or 30 per address in 15 minutes.
+// Sign-in throttle: 5 attempts per email or 30 per address in 15 minutes.
+// The attempt is recorded before it is counted, so a burst of parallel guesses
+// cannot all slip past an empty count. A successful sign-in clears its email.
 // ---------------------------------------------------------------------------
 
 const WINDOW = "15 minutes";
 const MAX_PER_EMAIL = 5;
 const MAX_PER_IP = 30;
 
-export async function loginBlocked(email: string, ip: string): Promise<boolean> {
+/** Record one sign-in attempt and say whether it is over the limit. */
+export async function recordLoginAttempt(email: string, ip: string | null): Promise<boolean> {
+  const e = normaliseEmail(email).slice(0, 254);
+  const addr = (ip ?? "").slice(0, 64);
   const row = await one<{ by_email: number; by_ip: number }>(
-    `select count(*) filter (where email = $1)::int as by_email, count(*) filter (where ip = $2)::int as by_ip
-       from login_failures where at > now() - interval '${WINDOW}' and (email = $1 or ip = $2)`,
-    [normaliseEmail(email), ip],
+    `with ins as (insert into login_failures (email, ip) values ($1, $2) returning 1)
+     select (select count(*)::int from login_failures where email = $1 and at > now() - interval '${WINDOW}') + 1 as by_email,
+            (select count(*)::int from login_failures where $2 <> '' and ip = $2 and at > now() - interval '${WINDOW}') + 1 as by_ip
+       from (select 1) one left join ins on true`,
+    [e, addr],
   );
-  return (row?.by_email ?? 0) >= MAX_PER_EMAIL || (row?.by_ip ?? 0) >= MAX_PER_IP;
-}
-
-export async function recordLoginFailure(email: string, ip: string) {
-  await q("insert into login_failures (email, ip) values ($1, $2)", [normaliseEmail(email), ip]);
   await q("delete from login_failures where at < now() - interval '1 day'");
+  return (row?.by_email ?? 0) > MAX_PER_EMAIL || (addr !== "" && (row?.by_ip ?? 0) > MAX_PER_IP);
 }
 
 export async function clearLoginFailures(email: string) {
-  await q("delete from login_failures where email = $1", [normaliseEmail(email)]);
+  await q("delete from login_failures where email = $1", [normaliseEmail(email).slice(0, 254)]);
 }
 
 // ---------------------------------------------------------------------------

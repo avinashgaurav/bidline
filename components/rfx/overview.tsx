@@ -75,20 +75,28 @@ export function OverviewTab({ cmp }: { cmp: Comparison }) {
     const g = groups.get(l.group || "Other") ?? { lowest: 0, budget: 0, priced: 0, total: 0 };
     g.total++;
     const p = naive.picks[l.no];
-    if (p) {
+    // Only lines with a budget, so the bar and the budget tick cover the same lines.
+    if (p && l.baseline_inr > 0) {
       g.lowest += p.extendedInr;
-      g.budget += (l.baseline_inr || 0) * l.qty;
+      g.budget += l.baseline_inr * l.qty;
       g.priced++;
     }
     groups.set(l.group || "Other", g);
   }
   const cats = [...groups.entries()].map(([name, g]) => ({ name, ...g })).sort((a, b) => b.budget - a.budget);
 
-  const pickedBudget = Object.keys(naive.picks).reduce((a, no) => {
+  // Savings against budget, on picked lines that have a budget only.
+  let pickedBudget = 0;
+  let pickedSpend = 0;
+  let unbudgeted = 0;
+  for (const [no, p] of Object.entries(naive.picks)) {
     const l = lines.find((x) => x.no === Number(no));
-    return a + (l ? (l.baseline_inr || 0) * l.qty : 0);
-  }, 0);
-  const saving = pickedBudget - naive.totalInr;
+    if (l && l.baseline_inr > 0) {
+      pickedBudget += l.baseline_inr * l.qty;
+      pickedSpend += p.extendedInr;
+    } else unbudgeted++;
+  }
+  const saving = pickedBudget - pickedSpend;
 
   const withDelta = rows.filter((r) => r.delta !== null);
   const cheapest = [...withDelta].sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0))[0];
@@ -105,7 +113,8 @@ export function OverviewTab({ cmp }: { cmp: Comparison }) {
         Buying every line from its cheapest supplier costs <b className="num font-medium">{inrShort(naive.totalInr)}</b> for {naive.linesAwarded} of {lines.length} lines,{" "}
         {pickedBudget ? (
           <>
-            <b className={`num font-medium ${saving >= 0 ? "text-success" : "text-warning"}`}>{inrShort(Math.abs(saving))} {saving >= 0 ? "under" : "over"}</b> the budget for those lines ({pct(-((saving / pickedBudget) * 100)).replace("+", "+")}).
+            <b className={`num font-medium ${saving >= 0 ? "text-success" : "text-warning"}`}>{inrShort(Math.abs(saving))} {saving >= 0 ? "under" : "over"}</b> the budget for {unbudgeted ? "the lines that have one" : "those lines"} ({pct(-((saving / pickedBudget) * 100))}).
+            {unbudgeted ? <span className="text-ink-secondary"> {unbudgeted} priced line{unbudgeted === 1 ? " has" : "s have"} no budget.</span> : null}
           </>
         ) : "with no budget set for those lines."}
         {naive.unfilledLines.length ? <span className="text-ink-secondary"> {naive.unfilledLines.length} line{naive.unfilledLines.length === 1 ? " has" : "s have"} no comparable price yet.</span> : null}
@@ -193,9 +202,9 @@ export function OverviewTab({ cmp }: { cmp: Comparison }) {
 
         <Chart
           title="Lowest quotes by category, against budget"
-          sub="The cheapest price on each line, added up by category, with the budget for the same lines."
+          sub="The cheapest price on each line, added up by category, with the budget for the same lines. Lines without a budget are left out."
           legend={[{ swatch: C.bar, label: "Lowest quoted" }, { swatch: C.budget, label: "Budget", tick: true }]}
-          table={{ head: ["Category", "Lines priced", "Lowest quoted", "Budget"], rows: cats.map((c) => [c.name, `${c.priced} of ${c.total}`, inr(c.lowest), inr(c.budget)]) }}
+          table={{ head: ["Category", "Lines with price and budget", "Lowest quoted", "Budget"], rows: cats.map((c) => [c.name, `${c.priced} of ${c.total}`, inr(c.lowest), inr(c.budget)]) }}
         >
           <div className="grid gap-2.5">
             {cats.map((c) => (

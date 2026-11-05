@@ -116,6 +116,64 @@ export function buildServer(user: User, appUrl: string): McpServer {
     return rfxs.map((r) => `${r.code} | ${r.event_type} | ${r.title} | ${r.status} | ${r.line_count} line items | ${r.responded}/${r.supplier_count} quoted | ${r.unread_docs} unread docs | ${appUrl}/rfx/${r.id}`).join("\n");
   }));
 
+  server.registerTool("list_open_work", {
+    title: "What is waiting, across all events",
+    description: "One list of everything waiting on the buyer across all open sourcing events: unread documents, prices that need review, overdue follow-ups and awards awaiting approval. Use it for 'what should I do today?'.",
+    inputSchema: { user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("list_open_work", args, async () => {
+    const rfxs = (await listRfxs(user.id)).filter((r) => !["awarded", "closed"].includes(r.status)).slice(0, 15);
+    if (!rfxs.length) return "Nothing open. Every sourcing event is awarded or closed.";
+    const overdue = await q<{ rfx_id: string; n: number }>(
+      `select c.rfx_id, count(*)::int as n from chases c join rfx r on r.id = c.rfx_id
+        where r.user_id = $1 and c.answered_at is null and c.closed_reason is null and c.due_at < now() group by c.rfx_id`, [user.id]);
+    const out: string[] = [];
+    for (const r of rfxs) {
+      const cmp = await loadComparison(r);
+      const review = cmp.trust.needsHuman + cmp.unmapped.filter((u) => !u.resolution).length;
+      const late = overdue.find((o) => o.rfx_id === r.id)?.n ?? 0;
+      const items = [
+        r.unread_docs ? `${r.unread_docs} unread document${r.unread_docs === 1 ? "" : "s"} (read them with read_document)` : "",
+        review ? `${review} price${review === 1 ? "" : "s"} need review (list_needs_attention)` : "",
+        late ? `${late} overdue follow-up${late === 1 ? "" : "s"} (get_chase_list)` : "",
+        r.award_status === "sent" ? "award awaiting approval (get_award_status)" : "",
+        !r.line_count ? "no line items yet (upsert_lines)" : "",
+      ].filter(Boolean);
+      out.push(`${r.code} ${r.title} [${r.status}]: ${items.length ? items.join("; ") : "nothing waiting"}. ${appUrl}/rfx/${r.id}`);
+    }
+    return out.join("\n");
+  }, { query: "Checked what is waiting across all events." }));
+
+  server.registerTool("price_history", {
+    title: "Price history for an item",
+    description: "What suppliers quoted for an item across all past sourcing events, matched by SKU or words in the description (e.g. 'docking station'). Landed per-unit prices in INR from Bidline's calculation, lowest first. Use it to sanity-check a new quote or set a budget.",
+    inputSchema: { query: z.string().describe("SKU or words from the item description."), user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("price_history", args, async () => {
+    const words = args.query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) throw new BadInput("Say which item, by SKU or description.");
+    const rows: string[] = [];
+    for (const r of (await listRfxs(user.id)).slice(0, 30)) {
+      const lines = (await getLines(r.id)).filter((l) => {
+        const hay = `${l.sku} ${l.desc}`.toLowerCase();
+        return words.every((w) => hay.includes(w));
+      });
+      if (!lines.length) continue;
+      const cmp = await loadComparison(r);
+      for (const l of lines) {
+        const prices = cmp.suppliers
+          .map((sup) => ({ sup, c: cmp.matrix[sup.code]?.[l.no] }))
+          .filter((x) => x.c && x.c.unitInr !== null && (x.c.status === "comparable" || x.c.status === "comparable_with_caveat"))
+          .sort((a, b) => (a.c!.unitInr ?? 0) - (b.c!.unitInr ?? 0));
+        rows.push(
+          `${r.code} (${r.created_at.slice(0, 10)}) L${l.no} ${l.sku} ${l.desc} | ${l.qty} x ${l.uom} | budget ${l.baseline_inr ? inr(l.baseline_inr) : "none"} | ` +
+          (prices.length ? prices.map((x) => `${x.sup.code} ${x.sup.name} ${inr(x.c!.unitInr)}`).join(", ") : "no comparable prices yet"),
+        );
+      }
+    }
+    return rows.length ? `Price history for "${args.query}" (per unit, landed, INR):\n${rows.join("\n")}` : `No line items matching "${args.query}" in any sourcing event.`;
+  }, { query: `Looked up price history for "${args.query}".` }));
+
   server.registerTool("get_rfx", {
     title: "Event details",
     description: "The Event details, every line item (item, specification, unit, pack size, quantity), the suppliers and their status, the questionnaire and any unclear line items.",
@@ -284,7 +342,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
 
   server.registerTool("duplicate_rfx", {
     title: "Duplicate a sourcing event",
-    description: "Start a new draft from an earlier event for a repeat purchase: copies line items, budgets, suppliers and the questionnaire. No quotes, documents, follow-ups or awards are copied.",
+    description: "Start a new draft from an earlier event for a repeat purchase: copies line items, budgets, suppliers and the questionnaire. No quotes, documents, follow-ups, awards, exchange rates or unit rules are copied; set rates again with set_fx_rate if needed.",
     inputSchema: { rfx: RFX, title: z.string().optional().describe("Title for the copy. Default: the original title with (copy)."), dueDate: z.string().optional().describe("YYYY-MM-DD"), user_request: USER_REQUEST },
     annotations: rw,
   }, async (args) => run("duplicate_rfx", args, async (ctx) => {

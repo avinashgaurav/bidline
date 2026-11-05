@@ -55,7 +55,14 @@ function nextStep(rfx: RfxRow, cmp: Comparison, unread: number, needsPerson: num
   if (award.status === "approved") {
     return { title: "Award approved", why: `Approved${award.decided_by ? ` by ${award.decided_by}` : ""}. Export the comparison and activity log for your records.`, done: true };
   }
-  return { title: "The approver asked for changes", why: award.decision_note ?? "Revise the award and send a new approval link.", tab: "award", cta: "Open award" };
+  const redraft = `In Bidline, draft a revised award on ${rfx.code} using qualified suppliers only and give me the new approval link.`;
+  if (award.status === "withdrawn") {
+    return { title: "Award withdrawn: draft a revised one", why: "The earlier approval link no longer accepts a decision. Draft a new award when the figures are final.", tab: "award", cta: "Open award", prompt: redraft };
+  }
+  if (award.status === "rejected") {
+    return { title: `The approver rejected the award${award.decided_by ? ` (${award.decided_by})` : ""}`, why: award.decision_note ?? "Review the options and draft a revised award.", tab: "award", cta: "Open award", prompt: redraft };
+  }
+  return { title: "The approver asked for changes", why: award.decision_note ?? "Revise the award and send a new approval link.", tab: "award", cta: "Open award", prompt: redraft };
 }
 
 export function NextStep({ rfx, cmp, unread, needsPerson, openItems, gate }: {

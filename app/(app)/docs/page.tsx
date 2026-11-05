@@ -4,10 +4,10 @@ import { ExternalLink, Plus } from "lucide-react";
 export const metadata = { title: "Docs · Bidline" };
 
 const TOOLS: Array<[string, Array<[string, string]>]> = [
-  ["Getting started", [["get_started", "What Bidline does and what is in your workspace"], ["list_rfxs", "Your sourcing events"], ["get_rfx", "One event: line items, suppliers, questionnaire"]]],
+  ["Getting started", [["get_started", "What Bidline does and what is in your workspace"], ["list_rfxs", "Your sourcing events"], ["list_open_work", "What is waiting on you, across all events"], ["get_rfx", "One event: line items, suppliers, questionnaire"]]],
   ["Set up an event", [["create_rfx", "Create a sourcing event (RFQ, RFP, RFI or tender)"], ["update_rfx", "Change title, type, due date, status, approver"], ["upsert_lines", "Add, change or remove line items"], ["add_questions", "Add questionnaire questions"], ["remove_questions", "Remove questions, with a reason"], ["issue_rfx", "Issue to suppliers, after the clarity check"], ["add_suppliers", "Add suppliers"], ["update_supplier", "Change a supplier's details or status"], ["duplicate_rfx", "Copy an event into a new draft for a repeat purchase"], ["add_line_note", "Add a note to a line item"]]],
   ["Read supplier documents", [["list_documents", "Files on an event"], ["read_document", "Open a file for Claude to read"], ["save_document_text", "Save text from the chat as a source"], ["update_document", "Set a file's supplier, type or status"], ["submit_quote", "Store what a quote says"], ["submit_questionnaire", "Store questionnaire answers and evidence"], ["submit_second_read", "Re-read photographed prices"]]],
-  ["Compare and decide", [["get_comparison", "Suppliers, coverage, totals and the grid"], ["get_line", "One line item across suppliers"], ["explain_cell", "How one price was worked out, and its history"], ["get_supplier", "One supplier in full"], ["list_needs_attention", "What needs review"], ["compare_award_options", "Every award option, priced"], ["what_if", "Price a hypothetical without saving it"]]],
+  ["Compare and decide", [["get_comparison", "Suppliers, coverage, totals and the grid"], ["get_line", "One line item across suppliers"], ["explain_cell", "How one price was worked out, and its history"], ["get_supplier", "One supplier in full"], ["list_needs_attention", "What needs review"], ["compare_award_options", "Every award option, priced"], ["what_if", "Price a hypothetical without saving it"], ["price_history", "What suppliers quoted for an item across past events"]]],
   ["Correct and set rules", [["correct_price", "Edit a price with a reason, or undo"], ["set_fx_rate", "Set an exchange rate"], ["add_unit_rule", "How a supplier's unit converts"], ["set_prior_po_rates", "Rates from a previous PO"], ["record_assumption", "Note an assumption"], ["resolve_unmatched_item", "Place or dismiss an unmatched item"]]],
   ["Follow up", [["get_chase_list", "What each supplier still owes"], ["email_supplier", "Draft, or send from your mailbox"], ["record_chase", "Record a follow-up without sending"], ["update_follow_up", "Mark answered or closed"]]],
   ["Award, export, history", [["create_award", "Award note and approval link"], ["withdraw_award", "Withdraw an award awaiting approval"], ["get_award_status", "Approval status"], ["get_export_link", "24-hour Excel, CSV or activity log link"], ["get_activity", "What changed, including edits in the app"]]],
@@ -71,7 +71,7 @@ export default function DocsPage() {
         </p>
       </Doc>
 
-      <Doc id="tools" title="What Claude can do in Bidline (42 tools)">
+      <Doc id="tools" title="What Claude can do in Bidline (44 tools)">
         <p className="text-sm text-ink-secondary">You never call these yourself. Ask Claude in plain words and it picks the right ones.</p>
         <div className="grid divide-y divide-border overflow-hidden rounded-xl bg-card ring-1 ring-border">
           {TOOLS.map(([group, tools]) => (

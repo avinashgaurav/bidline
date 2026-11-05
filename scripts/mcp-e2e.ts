@@ -188,8 +188,12 @@ async function main() {
     check("get_rfx shows line notes", /LINE NOTES[\s\S]*e2e: confirm warranty/.test(await call("get_rfx", { rfx: code })));
     const copy = await call("duplicate_rfx", { rfx: code, title: "e2e repeat purchase" });
     const copyCode = /Created (RFX-\d{4}-\d{4})/.exec(copy)?.[1];
-    const copied = copyCode ? await call("get_comparison", { rfx: copyCode }) : "";
-    check("duplicate_rfx copies lines and suppliers but no quotes", Boolean(copyCode) && /30 line items/.test(copy) && /5 suppliers/.test(copy) && !/₹3/.test(copied.split("\n").slice(0, 3).join(" ")));
+    const listed = (await call("list_rfxs", {})).split("\n").find((l) => copyCode && l.startsWith(copyCode)) ?? "";
+    check("duplicate_rfx copies lines and suppliers but no quotes", Boolean(copyCode) && /30 line items/.test(listed) && /0\/5 quoted/.test(listed) && /0 unread docs/.test(listed), listed);
+
+    const hist = await call("price_history", { query: catalog.lines[0].sku });
+    check("price_history finds the item with prices", hist.includes(code ?? "none") && /₹/.test(hist));
+    check("list_open_work lists the open events", (await call("list_open_work", {})).includes(copyCode ?? "none"));
 
     await call("get_line", { rfx: "RFX-0000-0000", lineNo: 1 }, true);
     const bad = await fetch(`${BASE}/mcp/bl_not_a_real_token`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });

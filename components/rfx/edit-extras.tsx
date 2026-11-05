@@ -33,8 +33,8 @@ export function DuplicateButton({ rfxId, title }: { rfxId: string; title: string
 }
 
 /** A destructive change that needs a reason for the audit trail. */
-function ReasonAction({ label, icon, title, text, placeholder, act }: {
-  label: string; icon: React.ReactNode; title: string; text: string; placeholder: string;
+function ReasonAction({ label, icon, title, text, placeholder, act, reasonLabel = "Reason (kept in the audit trail)" }: {
+  label: string; icon: React.ReactNode; title: string; text: string; placeholder: string; reasonLabel?: string;
   act: (s: FormState, f: FormData) => Promise<FormState>;
 }) {
   const [open, setOpen] = useState(false);
@@ -51,7 +51,7 @@ function ReasonAction({ label, icon, title, text, placeholder, act }: {
         <DialogDescription className="text-[13px] text-ink-secondary">{text}</DialogDescription>
         <form action={action} className="grid gap-3">
           <label className="grid gap-1.5 text-sm">
-            <span className="text-ink-secondary">Reason (kept in the audit trail)</span>
+            <span className="text-ink-secondary">{reasonLabel}</span>
             <input name="reason" required autoFocus className={fieldClass} placeholder={placeholder} />
           </label>
           <FormMessage state={state} />
@@ -74,7 +74,8 @@ export function WithdrawAward({ rfxId, awardId }: { rfxId: string; awardId: stri
   return (
     <ReasonAction label="Withdraw" icon={<Undo2 className="size-3.5" />} title="Withdraw this award?"
       text="The approval link stops accepting a decision and shows that the award was withdrawn. You can draft a new award afterwards."
-      placeholder="A revised quote arrived from Cygnus" act={withdrawAwardUI.bind(null, rfxId, awardId)} />
+      reasonLabel="Reason (kept in the audit trail and shown to the approver)"
+      placeholder="Waiting for a revised quote" act={withdrawAwardUI.bind(null, rfxId, awardId)} />
   );
 }
 

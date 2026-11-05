@@ -237,7 +237,7 @@ create table if not exists awards (
   note_md       text not null,
   commentary    text,
   share_token   text not null unique,
-  -- draft | sent | approved | rejected | changes_requested
+  -- draft | sent | approved | rejected | changes_requested | withdrawn
   status        text not null default 'sent',
   decided_by    text,
   decided_at    timestamptz,

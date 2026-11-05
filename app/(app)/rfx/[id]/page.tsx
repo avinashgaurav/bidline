@@ -55,7 +55,7 @@ export default async function RfxPage({ params, searchParams }: {
     throw e;
   });
   const [cmp, version, audit, notes] = await Promise.all([
-    loadComparison(rfx), versionOf({ rfxId: rfx.id }), listEvents({ rfxId: rfx.id, limit: 500 }), getLineNotes(rfx.id),
+    loadComparison(rfx), versionOf({ rfxId: rfx.id }), listEvents({ rfxId: rfx.id, limit: 200 }), getLineNotes(rfx.id),
   ]);
   const tab = TABS.some(([k]) => k === sp.tab) ? sp.tab! : "overview";
   const unread = cmp.documents.filter((d) => d.status === "unread").length;
@@ -68,14 +68,14 @@ export default async function RfxPage({ params, searchParams }: {
   const openItems = cmp.suppliers.reduce((a, s) => a + (cmp.supplierInfo[s.code]?.gaps?.gapCount ?? 0), 0);
   const latestAward = cmp.awards[0];
   const approver = (rfx.approver as { name?: string }).name;
-  const counts: Record<string, { n?: number; warn?: boolean; label?: string }> = {
+  const counts: Record<string, { n?: number; warn?: boolean; label?: string; tone?: string }> = {
     lines: { n: cmp.lines.length, warn: gate.length > 0 },
     suppliers: { n: cmp.suppliers.length },
     documents: unread ? { n: unread, warn: true } : { n: cmp.documents.length },
     comparison: needsPerson ? { n: needsPerson, warn: true } : {},
     questionnaire: { n: cmp.questions.length },
     chase: openItems && cmp.hasAnyReading ? { n: openItems, warn: true } : {},
-    award: latestAward ? { label: latestAward.status === "sent" ? "Awaiting approval" : latestAward.status.replace("_", " ") } : {},
+    award: latestAward ? { label: latestAward.status === "sent" ? "Awaiting approval" : latestAward.status.replace("_", " "), tone: latestAward.status } : {},
   };
 
   return (
@@ -153,7 +153,12 @@ export default async function RfxPage({ params, searchParams }: {
                 {k.n !== undefined && k.n > 0 ? (
                   <span className={`num rounded-full px-1.5 text-[11px] leading-[18px] ${k.warn ? "bg-warning/10 text-warning" : "bg-muted text-ink-secondary"}`}>{k.n}</span>
                 ) : null}
-                {k.label ? <span className="rounded-full bg-success/10 px-1.5 text-[11px] leading-[18px] capitalize text-success">{k.label}</span> : null}
+                {k.label ? (
+                  <span className={`rounded-full px-1.5 text-[11px] leading-[18px] capitalize ${
+                    k.tone === "approved" ? "bg-success/10 text-success" : k.tone === "sent" || k.tone === "changes_requested" ? "bg-warning/10 text-warning"
+                      : k.tone === "rejected" ? "bg-destructive/10 text-destructive" : "bg-muted text-ink-secondary"
+                  }`}>{k.label}</span>
+                ) : null}
               </Link>
             </Tip>
           );
