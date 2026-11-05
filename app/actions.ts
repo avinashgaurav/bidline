@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { refresh, revalidatePath } from "next/cache";
 import { headers } from "next/headers";
+import { after } from "next/server";
 import {
   checkLogin, clearLoginFailures, createUser, endSession, newMcpToken, normaliseEmail, recordLoginAttempt, requireUser, startSession,
 } from "@/lib/auth";
@@ -111,8 +112,8 @@ export async function loadDemoAction(): Promise<FormState> {
   try {
     await A.requireWorkspacePerm(user.id, "edit");
     await seedDemoRfx(user.id);
-    // Two smaller events beside it, so the dashboard and Claude have more than one purchase.
-    await seedExtraDemos(user.id).catch((e) => console.error("[demo-extra]", e));
+    // Two smaller events beside it, added just after the page opens; the dashboard updates itself when they land.
+    after(() => seedExtraDemos(user.id).catch((e) => console.error("[demo-extra]", e)));
   } catch (e) {
     if (e instanceof BadInput) return { error: e.message };
     console.error(e);

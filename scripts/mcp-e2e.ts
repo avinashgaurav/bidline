@@ -214,7 +214,7 @@ async function main() {
     check("list_templates shows it", /e2e template/.test(await call("list_templates", {})));
     check("create_rfx_from_template creates an event", /from the template/.test(await call("create_rfx_from_template", { template: "e2e template", title: "e2e from template" })));
     check("issue_rfx refuses an unready event", /checklist|unclear|Not issued/.test(await call("issue_rfx", { rfx: copyCode })));
-    check("all 58 tools are offered to an admin", toolCount === 58, `${toolCount}`);
+    check("all 57 tools are on for an admin (decide_award stays off until switched on)", toolCount === 57, `${toolCount}`);
 
     await call("get_line", { rfx: "RFX-0000-0000", lineNo: 1 }, true);
     const bad = await fetch(`${BASE}/mcp/bl_not_a_real_token`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });

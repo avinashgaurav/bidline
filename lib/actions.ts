@@ -924,7 +924,7 @@ export async function decideAwardInAppAction(ctx: ActionCtx, rfxRef: string, awa
   if (award.status !== "sent") throw new BadInput(`This award is ${award.status.replace(/_/g, " ")}, so it no longer takes a decision.`);
   if (await decideStep({
     awardId, token: null, decision, name: me?.name ?? "Approver", note: note ?? null, decider: { userId: ctx.userId, email: me?.email ?? null },
-    log: { userId: ctx.userId, actor: "user", rfxId: rfx.id, code: rfx.code },
+    log: { userId: ctx.userId, actor: ctx.actor === "claude" ? "claude" : "user", rfxId: rfx.id, code: rfx.code, tool: ctx.tool ?? null, userRequest: ctx.userRequest ?? null },
   })) return;
   const done = await q(
     `update awards set status = $3, decided_by = $4, decided_at = now(), decision_note = $5 where id = $1 and rfx_id = $2 and status = 'sent' returning id`,
@@ -935,7 +935,7 @@ export async function decideAwardInAppAction(ctx: ActionCtx, rfxRef: string, awa
   await announce(rfx.id, "award_decided", `${me?.name ?? "The approver"} decided the award on ${rfx.code}: ${decision.replace("_", " ")}.`);
   if (award.drafted_by_user && award.drafted_by_user !== ctx.userId) await notify([award.drafted_by_user], "award_decided", `award ${decision.replace("_", " ")} on ${rfx.code}`, `${me?.name ?? "The approver"} decided the award on ${rfx.code}: ${decision.replace("_", " ")}${note ? `, "${note}"` : "."}`);
   await log(ctx, rfx.id, "award_decided",
-    `${me?.name ?? "Approver"} ${decision === "approved" ? "approved" : decision === "rejected" ? "rejected" : "asked for changes to"} the award on ${rfx.code} in the app${note ? `: "${note}"` : "."}`,
+    `${me?.name ?? "Approver"} ${decision === "approved" ? "approved" : decision === "rejected" ? "rejected" : "asked for changes to"} the award on ${rfx.code} ${ctx.actor === "claude" ? "through Claude" : "in the app"}${note ? `: "${note}"` : "."}`,
     { awardId, decision, note: note ?? null });
 }
 

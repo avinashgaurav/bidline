@@ -21,7 +21,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const user = await requireUser();
   const [events, workspaces, version, base, prefRow] = await Promise.all([
     listRfxs(user.id), myWorkspaces(user.id), versionOf({ userId: user.id }), appUrlFromHeaders(),
-    one<{ prefs: unknown }>("select prefs from users where id = $1", [user.id]),
+    one<{ prefs: unknown }>("select prefs from users where id = $1", [user.id]).catch(() => null),
   ]);
   const prefs = readPrefs(prefRow?.prefs);
   const sidebarEvents = events.map((e) => ({

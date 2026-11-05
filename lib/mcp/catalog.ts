@@ -8,6 +8,15 @@ import { can } from "../roles";
 
 export interface ToolInfo { name: string; title: string; description: string; readOnly: boolean }
 
+/**
+ * Off until an admin switches them on: tools that act with weight on Claude's
+ * word alone. Stored as "+name" in the workspace's tool list when switched on.
+ */
+export const DEFAULT_OFF = ["decide_award"];
+
+/** Whether a tool is switched on for the workspace. */
+export const toolOn = (name: string, list: string[]) => (DEFAULT_OFF.includes(name) ? list.includes(`+${name}`) : !list.includes(name));
+
 /** Always on: Claude needs these to find its way around. */
 export const LOCKED_TOOLS = ["get_started", "list_rfxs", "get_rfx"];
 
@@ -58,7 +67,7 @@ export const groupOf = (tool: string) => TOOL_GROUPS.find((g) => g.tools.include
 
 /** Whether Claude is offered this tool for this person: switched on for the workspace and allowed for their role. */
 export function toolAllowed(t: Pick<ToolInfo, "name" | "readOnly">, role: string, disabled: string[]): boolean {
-  if (disabled.includes(t.name) && !LOCKED_TOOLS.includes(t.name)) return false;
+  if (!toolOn(t.name, disabled) && !LOCKED_TOOLS.includes(t.name)) return false;
   if (t.readOnly) return true;
   if (t.name === "add_line_note" || t.name === "comment_on_price") return can(role, "note");
   if (t.name === "decide_award") return can(role, "approve");

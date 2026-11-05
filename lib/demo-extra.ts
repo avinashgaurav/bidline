@@ -10,7 +10,7 @@ import type { ActionCtx } from "./actions";
  * Quotes are submitted through the same action Claude uses, as Claude.
  */
 
-type Line = { sku: string; group: string; description: string; uom: string; qty: number; baselineInr: number };
+type Line = { sku: string; group: string; description: string; uom: string; qty: number; baselineInr: number; packSize?: number };
 type Sup = { name: string; city: string; gstin: string; email: string; contactName: string };
 
 const FURNITURE: { title: string; lines: Line[]; suppliers: Sup[]; prices: number[][] } = {
@@ -39,12 +39,12 @@ const SUPPLIES: { title: string; lines: Line[]; suppliers: Sup[]; prices: Array<
   title: "Housekeeping and pantry supplies, Q4",
   lines: [
     { sku: "HK-FLR-5L", group: "Cleaning", description: "Floor cleaner concentrate, 5 L can", uom: "Can", qty: 60, baselineInr: 640 },
-    { sku: "HK-TIS-100", group: "Paper", description: "Tissue roll, 2 ply, pack of 10", uom: "Pack", qty: 120, baselineInr: 310 },
-    { sku: "HK-GBG-L", group: "Cleaning", description: "Garbage bags, large, 30 per roll", uom: "Roll", qty: 200, baselineInr: 145 },
+    { sku: "HK-TIS-100", group: "Paper", description: "Tissue roll, 2 ply, pack of 10", uom: "Pack", packSize: 10, qty: 120, baselineInr: 310 },
+    { sku: "HK-GBG-L", group: "Cleaning", description: "Garbage bags, large, 30 per roll", uom: "Roll", packSize: 30, qty: 200, baselineInr: 145 },
     { sku: "PT-TEA-1K", group: "Pantry", description: "Tea leaves, CTC, 1 kg", uom: "Kg", qty: 40, baselineInr: 520 },
     { sku: "PT-COF-500", group: "Pantry", description: "Instant coffee, 500 g jar", uom: "Jar", qty: 30, baselineInr: 690 },
-    { sku: "PT-SUG-1K", group: "Pantry", description: "Sugar sachets, 1 kg box of 200", uom: "Box", qty: 25, baselineInr: 380 },
-    { sku: "PT-CUP-1K", group: "Pantry", description: "Paper cups 150 ml, pack of 1000", uom: "Pack", qty: 15, baselineInr: 950 },
+    { sku: "PT-SUG-1K", group: "Pantry", description: "Sugar sachets, 1 kg box of 200", uom: "Box", packSize: 200, qty: 25, baselineInr: 380 },
+    { sku: "PT-CUP-1K", group: "Pantry", description: "Paper cups 150 ml, pack of 1000", uom: "Pack", packSize: 1000, qty: 15, baselineInr: 950 },
     { sku: "HK-SAN-500", group: "Cleaning", description: "Hand sanitiser, 500 ml pump", uom: "Nos", qty: 80, baselineInr: 210 },
   ],
   suppliers: [
@@ -117,21 +117,37 @@ async function makeEvent(user: ActionCtx, spec: { title: string; lines: Line[]; 
 }
 
 export async function seedExtraDemos(userId: string) {
+  // Once per workspace: a second click on "Load the demo" does not add copies.
+  const have = await q<{ title: string }>(
+    "select title from rfx where workspace_id = (select workspace_id from users where id = $1) and created_via = 'demo' and title = any($2)",
+    [userId, [FURNITURE.title, SUPPLIES.title]]);
   const user: ActionCtx = { userId, actor: "user" };
   const claude: ActionCtx = { userId, actor: "claude", tool: "submit_quote", userRequest: "Read the supplier quotes and submit them" };
+  const made = await Promise.all([
+    have.some((x) => x.title === FURNITURE.title) ? null : seedFurniture(user, claude),
+    have.some((x) => x.title === SUPPLIES.title) ? null : seedSupplies(user, claude),
+  ]);
+  return made.filter(Boolean) as string[];
+}
 
-  // 1. Office furniture: issued, all quotes read, award drafted and approved on the link.
+async function seedFurniture(user: ActionCtx, claude: ActionCtx) {
+  // Office furniture: issued, all quotes read, award drafted and approved on the link.
   const f = await makeEvent(user, FURNITURE, daysFrom(-12), { name: "Rajat Menon", email: "rajat.menon@example.com" });
-  await A.issueRfxAction(user, f.code);
+  const fi = await A.issueRfxAction(user, f.code);
+  if (!fi.issued) throw new Error(`demo ${f.code} did not pass the checklist`);
   const fSups = await q<{ code: string; name: string }>("select code, name from suppliers where rfx_id = $1 order by code", [f.id]);
   for (const [i, s] of fSups.entries()) await readQuote(claude, f.code, FURNITURE.suppliers[i], s.code, f.title, FURNITURE.lines, FURNITURE.prices[i]);
   const award = await A.createAwardAction(user, { rfx: f.code, scenario: "cheapest_all" });
   await A.decideAwardAction({ token: award.token, decision: "approved", name: "Rajat Menon", note: "Approved. Spread across two suppliers is fine." });
+  return f.code;
+}
 
-  // 2. Housekeeping: issued, two quotes read, one emailed reply waiting for Claude, one follow-up overdue.
+async function seedSupplies(user: ActionCtx, claude: ActionCtx) {
+  // Housekeeping: issued, two quotes read, one emailed reply waiting for Claude, one follow-up overdue.
   const h = await makeEvent(user, SUPPLIES, daysFrom(3), { name: "Rajat Menon", email: "rajat.menon@example.com" });
   await q("update suppliers set contact = contact || '{\"email\":\"greenleaf.hygiene@example.com\"}'::jsonb where rfx_id = $1 and name = $2", [h.id, "GreenLeaf Hygiene"]);
-  await A.issueRfxAction(user, h.code);
+  const hi = await A.issueRfxAction(user, h.code);
+  if (!hi.issued) throw new Error(`demo ${h.code} did not pass the checklist`);
   const hSups = await q<{ code: string }>("select code from suppliers where rfx_id = $1 order by code", [h.id]);
   for (const [i, s] of hSups.entries()) {
     const p = SUPPLIES.prices[i];
@@ -145,5 +161,5 @@ export async function seedExtraDemos(userId: string) {
   await q("update documents set status = 'unread' where rfx_id = $1 and filename = 'Metro_Pantry_reply.eml.txt'", [h.id]);
   // GreenLeaf has not replied: a follow-up went out and its reply-by date has passed.
   await A.recordChaseAction(user, { rfx: h.code, supplier: hSups[3].code, dueDate: daysFrom(-2), subject: `Reminder: quotation for ${h.title}`, message: "Dear Vikram, we have not yet received your quotation. Please send it by the date below so we can include you. Regards, Procurement", send: false, to: "greenleaf.hygiene@example.com" });
-  return [f.code, h.code];
+  return h.code;
 }

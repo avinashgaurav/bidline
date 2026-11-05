@@ -21,6 +21,7 @@ export async function listTemplates(userId: string): Promise<Template[]> {
 export async function saveTemplate(ctx: ActionCtx, rfxRef: string | null | undefined, name?: string | null) {
   const rfx = await resolveRfx(ctx.userId, rfxRef);
   if (!can(rfx.my_role, "edit")) throw new BadInput(deniedMessage(rfx.my_role, "edit"));
+  if (rfx.restricted) throw new BadInput("This event is restricted to named people, so it cannot become a template everyone in the workspace can see.");
   const [lines, questions] = await Promise.all([getLines(rfx.id), getQuestions(rfx.id)]);
   if (!lines.length) throw new BadInput("This event has no line items to save.");
   const id = newId("tpl");
@@ -39,7 +40,7 @@ export async function saveTemplate(ctx: ActionCtx, rfxRef: string | null | undef
 export async function createFromTemplate(ctx: ActionCtx, templateRef: string, input: { title?: string | null; dueDate?: string | null }) {
   await requireWorkspacePerm(ctx.userId, "edit");
   const t = await one<{ id: string; name: string; event_type: string; lines: never[]; questions: never[] }>(
-    `select * from rfx_templates where workspace_id = (select workspace_id from users where id = $1) and (id = $2 or lower(name) = lower($2)) limit 1`,
+    `select * from rfx_templates where workspace_id = (select workspace_id from users where id = $1) and (id = $2 or lower(name) = lower($2)) order by (id = $2) desc, created_at desc limit 1`,
     [ctx.userId, templateRef.trim()]);
   if (!t) throw new NotFound(`No template "${templateRef}". Use list_templates to see what exists.`);
   const r = await createRfxAction(ctx, { title: input.title?.trim() || t.name, eventType: t.event_type, dueDate: input.dueDate ?? null, lines: t.lines, questions: t.questions });

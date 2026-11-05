@@ -5,6 +5,7 @@ import { normaliseEmail } from "./auth";
 import { BadInput, NotFound, resolveRfx } from "./rfx";
 import { requireWorkspacePerm } from "./actions";
 import { can, deniedMessage, isRole, roleLabel } from "./roles";
+import { DEFAULT_OFF } from "./mcp/catalog";
 
 /**
  * The team: who is in a workspace, with which role, and who can see a
@@ -169,7 +170,10 @@ export async function setToolEnabled(userId: string, tool: string, enabled: bool
   if (!enabled && locked.includes(tool)) throw new BadInput("This tool is needed for Bidline to work with Claude and cannot be switched off.");
   const { workspace_id } = await ws(userId);
   const now = await disabledTools(workspace_id);
-  const next = enabled ? now.filter((t) => t !== tool) : [...new Set([...now, tool])];
+  // Most tools are on unless listed; a default-off tool is on only when listed as "+name".
+  const next = DEFAULT_OFF.includes(tool)
+    ? (enabled ? [...new Set([...now, `+${tool}`])] : now.filter((t) => t !== `+${tool}`))
+    : (enabled ? now.filter((t) => t !== tool) : [...new Set([...now, tool])]);
   if (next.length === now.length && next.every((t) => now.includes(t))) return;
   await q("update workspaces set disabled_tools = $2 where id = $1", [workspace_id, next]);
   await audit(userId, workspace_id, "tools_changed", `Switched ${enabled ? "on" : "off"} the Claude tool ${tool}.`,

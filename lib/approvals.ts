@@ -55,7 +55,7 @@ export async function decideStep(opts: {
   awardId: string; token: string | null; decision: Decision; name: string; note: string | null;
   /** Set for a decision made signed in to the app. */
   decider?: { userId: string; email: string | null };
-  log: { userId: string; actor: "approver" | "user"; rfxId: string; code: string };
+  log: { userId: string; actor: "approver" | "user" | "claude"; rfxId: string; code: string; tool?: string | null; userRequest?: string | null };
 }): Promise<boolean> {
   const steps = await stepsOf(opts.awardId);
   if (!steps.length) return false;
@@ -75,7 +75,7 @@ export async function decideStep(opts: {
     }
     // The same account cannot decide two steps: checked against the audit trail, by account, not by name.
     const earlier = await one(
-      `select 1 from events where kind in ('award_step_decided', 'award_decided') and actor = 'user' and user_id = $1 and detail->>'awardId' = $2 limit 1`,
+      `select 1 from events where kind in ('award_step_decided', 'award_decided') and actor in ('user', 'claude') and user_id = $1 and detail->>'awardId' = $2 limit 1`,
       [opts.decider.userId, opts.awardId]);
     if (earlier) throw new BadInput("You already decided an earlier step of this award. A different person must decide this one.");
   }
@@ -87,7 +87,7 @@ export async function decideStep(opts: {
   if (opts.decision === "approved" && next) {
     await q("update award_steps set status = 'sent' where id = $1", [next.id]);
     await logEvent({
-      userId: opts.log.userId, rfxId: opts.log.rfxId, actor: opts.log.actor, kind: "award_step_decided",
+      userId: opts.log.userId, rfxId: opts.log.rfxId, actor: opts.log.actor, tool: opts.log.tool ?? null, userRequest: opts.log.userRequest ?? null, kind: "award_step_decided",
       summary: `${opts.name} approved step ${step.step + 1} of ${steps.length} on ${opts.log.code}. Now with ${next.name}.`,
       detail: { awardId: opts.awardId, step: step.step + 1, decision: opts.decision, name: opts.name, note: opts.note },
     });
@@ -103,7 +103,7 @@ export async function decideStep(opts: {
   await announce(opts.log.rfxId, "award_decided", `${opts.name} ${verb} the award on ${opts.log.code}.`);
   if (drafter?.drafted_by_user) await notify([drafter.drafted_by_user], "award_decided", `award ${verb} on ${opts.log.code}`, `${opts.name} ${verb} the award on ${opts.log.code}${opts.note ? `: "${opts.note}"` : "."}`);
   await logEvent({
-    userId: opts.log.userId, rfxId: opts.log.rfxId, actor: opts.log.actor, kind: "award_decided",
+    userId: opts.log.userId, rfxId: opts.log.rfxId, actor: opts.log.actor, tool: opts.log.tool ?? null, userRequest: opts.log.userRequest ?? null, kind: "award_decided",
     summary: `${opts.name} ${verb} the award on ${opts.log.code}${steps.length > 1 ? ` (step ${step.step + 1} of ${steps.length})` : ""}${opts.note ? `: "${opts.note}"` : "."}`,
     detail: { awardId: opts.awardId, decision: opts.decision, name: opts.name, step: step.step + 1, note: opts.note },
   });

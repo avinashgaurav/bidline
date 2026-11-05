@@ -4,7 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { disabledTools } from "@/lib/team";
 import { getEmailAccount } from "@/lib/mail";
 import { toolCatalog } from "@/lib/mcp/server";
-import { INTEGRATIONS, LOCKED_TOOLS, TOOL_GROUPS, toolAllowed } from "@/lib/mcp/catalog";
+import { INTEGRATIONS, LOCKED_TOOLS, TOOL_GROUPS, toolAllowed, toolOn } from "@/lib/mcp/catalog";
 import { can, roleLabel } from "@/lib/roles";
 import { ToolToggle } from "@/components/tool-toggle";
 import { ClaudeMark } from "@/components/claude-mark";
@@ -32,7 +32,7 @@ export default async function ToolsPage() {
           <h1 className="text-[24px] leading-tight tracking-[-0.01em]">Claude tools and integrations</h1>
           <p className="mt-1 max-w-[72ch] text-[14px] text-ink-secondary">
             Bidline has no AI of its own. It gives your Claude a set of tools, listed below by job: you just ask in plain words and Claude picks the right one. Your Claude can use {mine} of them
-            ({roleLabel(user.role)} role{off.length ? `, ${off.length} switched off for the workspace` : ""}).{admin ? " As an admin you can switch any tool off for everyone." : ""}
+            ({roleLabel(user.role)} role{off.filter((t) => !t.startsWith("+")).length ? `, ${off.filter((t) => !t.startsWith("+")).length} switched off for the workspace` : ""}).{admin ? " As an admin you can switch any tool off for everyone." : ""}
           </p>
         </div>
         <Link href="/connect" className={`inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-[13.5px] ${connected ? "bg-card ring-1 ring-border hover:bg-muted" : "bg-primary text-white hover:bg-primary/90"}`}>
@@ -83,7 +83,7 @@ export default async function ToolsPage() {
             {g.tools.map((name) => {
               const t = byName.get(name);
               if (!t) return null;
-              const workspaceOn = !off.includes(name) || LOCKED_TOOLS.includes(name);
+              const workspaceOn = toolOn(name, off) || LOCKED_TOOLS.includes(name);
               const forMe = toolAllowed(t, user.role, off);
               return (
                 <li key={name} className="grid gap-2 border-b border-border px-4 py-2.5 last:border-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-4">
