@@ -34,7 +34,7 @@ export default async function Dashboard() {
 
   if (!rfxs.length) {
     return (
-      <div className="mx-auto grid max-w-5xl gap-8">
+      <div className="mx-auto grid max-w-5xl grid-cols-1 gap-8">
         {onboarding}
         <div>
           <h1 className="text-[42px] leading-tight">Welcome to Bidline</h1>
@@ -78,7 +78,7 @@ export default async function Dashboard() {
   }
 
   return (
-    <div className="grid gap-8">
+    <div className="grid grid-cols-1 gap-8">
       {onboarding}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
@@ -86,7 +86,7 @@ export default async function Dashboard() {
         </div>
         <LiveRefresh url="/api/rfx/all/version" initial={version} />
       </div>
-      <div className="grid gap-8 lg:grid-cols-[1fr_360px]">
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="grid content-start gap-4">
           {rfxs.map((r) => (
             <Link key={r.id} href={`/rfx/${r.id}`} className="group rounded-xl bg-card p-6 ring-1 ring-border transition hover:ring-primary/40">

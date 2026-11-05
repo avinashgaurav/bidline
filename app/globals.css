@@ -102,6 +102,12 @@
     font-weight: 480;
     letter-spacing: 0.005em;
   }
+  /* A grid with no explicit columns is one column that may shrink, so a long
+     link or code line cannot stretch the page wider than a phone screen.
+     Any grid-cols-* utility still wins, since utilities sit above base. */
+  main .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .eyebrow {
