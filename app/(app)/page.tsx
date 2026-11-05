@@ -54,7 +54,9 @@ export default async function Dashboard() {
         <section className="rounded-2xl bg-card p-5 ring-1 ring-border sm:p-7">
           <StartChoice />
         </section>
-        <LiveRefresh url="/api/rfx/all/version" initial={version} />
+        <div className="justify-self-start">
+          <LiveRefresh url="/api/rfx/all/version" initial={version} />
+        </div>
       </div>
     );
   }

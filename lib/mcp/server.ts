@@ -127,9 +127,10 @@ export function buildServer(user: User, appUrl: string): McpServer {
     const overdue = await q<{ rfx_id: string; n: number }>(
       `select c.rfx_id, count(*)::int as n from chases c join rfx r on r.id = c.rfx_id
         where r.user_id = $1 and c.answered_at is null and c.closed_reason is null and c.due_at < now() group by c.rfx_id`, [user.id]);
+    const cmps = await Promise.all(rfxs.map((r) => loadComparison(r)));
     const out: string[] = [];
-    for (const r of rfxs) {
-      const cmp = await loadComparison(r);
+    for (const [i, r] of rfxs.entries()) {
+      const cmp = cmps[i];
       const review = cmp.trust.needsHuman + cmp.unmapped.filter((u) => !u.resolution).length;
       const late = overdue.find((o) => o.rfx_id === r.id)?.n ?? 0;
       const items = [
@@ -153,13 +154,17 @@ export function buildServer(user: User, appUrl: string): McpServer {
     const words = args.query.toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) throw new BadInput("Say which item, by SKU or description.");
     const rows: string[] = [];
-    for (const r of (await listRfxs(user.id)).slice(0, 30)) {
-      const lines = (await getLines(r.id)).filter((l) => {
+    const events = (await listRfxs(user.id)).slice(0, 30);
+    const matched = (await Promise.all(events.map(async (r) => ({
+      r,
+      lines: (await getLines(r.id)).filter((l) => {
         const hay = `${l.sku} ${l.desc}`.toLowerCase();
         return words.every((w) => hay.includes(w));
-      });
-      if (!lines.length) continue;
-      const cmp = await loadComparison(r);
+      }),
+    })))).filter((m) => m.lines.length);
+    const cmps = await Promise.all(matched.map((m) => loadComparison(m.r)));
+    for (const [i, { r, lines }] of matched.entries()) {
+      const cmp = cmps[i];
       for (const l of lines) {
         const prices = cmp.suppliers
           .map((sup) => ({ sup, c: cmp.matrix[sup.code]?.[l.no] }))

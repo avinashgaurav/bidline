@@ -41,7 +41,10 @@ export function OverviewTab({ cmp }: { cmp: Comparison }) {
       <div className="grid place-items-center gap-2 rounded-xl bg-card px-6 py-14 text-center ring-1 ring-border">
         <p className="text-[17px] font-medium">Charts appear once Claude reads the first quote</p>
         <p className="max-w-[52ch] text-sm text-ink-secondary">
-          Upload the supplier quotes on Documents and ask your Claude to read them. Totals against budget, lines won and quote quality fill in here as each one lands.
+          {cmp.documents.some((d) => d.status === "unread")
+            ? "The supplier documents are uploaded. Ask your Claude to read them; "
+            : "Upload the supplier quotes on Documents and ask your Claude to read them; "}
+          totals against budget, lines won and quote quality fill in here as each one lands.
         </p>
         <Link href={`/rfx/${cmp.rfx.id}?tab=documents`} className="mt-2 inline-flex h-8 items-center rounded-full bg-primary px-3.5 text-sm text-white hover:bg-primary/90">Go to Documents</Link>
       </div>
@@ -209,11 +212,11 @@ export function OverviewTab({ cmp }: { cmp: Comparison }) {
           <div className="grid gap-2.5">
             {cats.map((c) => (
               <Row key={c.name} label={c.name} wide>
-                <Tip text={`${c.name}: lowest ${inr(c.lowest)} against a budget of ${inr(c.budget)} on ${c.priced} of ${c.total} lines.`}>
+                <Tip text={c.priced ? `${c.name}: lowest ${inr(c.lowest)} against a budget of ${inr(c.budget)} on ${c.priced} of ${c.total} lines.` : `${c.name}: no line in this category has both a price and a budget yet.`}>
                   <span tabIndex={0} className="relative flex h-5 items-center outline-none">
                     <span className="h-4 rounded-r-[4px] hover:opacity-85" style={{ width: `${(c.lowest / maxCat) * 82}%`, minWidth: c.lowest ? 3 : 0, background: C.bar }} />
                     {c.budget ? <span aria-hidden className="absolute inset-y-0 w-[2px] rounded" style={{ left: `${(c.budget / maxCat) * 82}%`, background: C.budget }} /> : null}
-                    <span className="num ml-auto pl-2 text-xs whitespace-nowrap">{inrShort(c.lowest)}</span>
+                    <span className={`num ml-auto pl-2 text-xs whitespace-nowrap ${c.priced ? "" : "text-ink-secondary"}`}>{c.priced ? inrShort(c.lowest) : "No budget set"}</span>
                   </span>
                 </Tip>
               </Row>

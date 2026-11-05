@@ -9,7 +9,7 @@ import {
 import { extractionSchema, validateExtraction, type Extraction } from "./extract/contract";
 import { getDocument, storeDocument, storeTextDocument, type DocumentRow } from "./files";
 import { cellKey, loadComparison } from "./comparison";
-import { chaseMessage, type ChaseKind } from "./calc/chase";
+import { VAGUE, chaseMessage, type ChaseItem, type ChaseKind } from "./calc/chase";
 import type { RawQuote } from "./calc/normalise";
 import type { ReadAnswer } from "./calc/questionnaire";
 import { buildAwardSnapshot, awardMarkdown, type ScenarioKey } from "./award";
@@ -476,30 +476,53 @@ export async function submitQuestionnaireAction(ctx: ActionCtx, input: {
 
 /**
  * A follow-up is answered only when every item it asked about now has an
- * answer from this supplier, in any reading so far: each line it named has a
- * price, each term it asked for has been stated, each question it asked about
- * has an answer.
+ * answer from this supplier, judged item by item: a missing or disputed price
+ * is answered by a firm price in any reading so far (or an
+ * explicit "not quoting"), a term by a stated, non-vague value in the latest
+ * quote, a question by
+ * an answer, a missing certificate by an attached document. Prices carried
+ * forward from an earlier revision need the supplier's confirmation, so a
+ * person closes those.
  */
 async function closeAnsweredFollowUps(supplierId: string) {
-  const open = await q<{ id: string; items: Array<{ lineNos?: number[]; questionNo?: string; termKey?: string }> }>(
+  const open = await q<{ id: string; items: ChaseItem[] }>(
     `select id, items from chases where supplier_id = $1 and answered_at is null and closed_reason is null`, [supplierId]);
   if (!open.length) return;
-  const [cells, subs, reads] = await Promise.all([
-    q<{ line_no: number }>(
-      `select distinct line_no from quote_cells where supplier_id = $1 and raw_price is not null
-         and raw_status not in ('omitted','not_quoted','illegible','match_rival')`, [supplierId]),
-    q<{ terms: Record<string, unknown> }>(`select terms from submissions where supplier_id = $1 and not superseded`, [supplierId]),
-    q<{ answers: Array<{ questionNo?: string; answer?: string | null }> }>(`select answers from questionnaire_reads where supplier_id = $1`, [supplierId]),
+  const [cells, latest, reads] = await Promise.all([
+    q<{ line_no: number; raw_status: string; raw_price: number | null }>(
+      `select line_no, raw_status, raw_price from quote_cells where supplier_id = $1`, [supplierId]),
+    one<{ terms: Record<string, unknown> }>(
+      `select terms from submissions where supplier_id = $1 order by revision desc, created_at desc limit 1`, [supplierId]),
+    q<{ answers: Array<{ questionNo?: string; answer?: string | null; attachedDocument?: string | null }> }>(
+      `select answers from questionnaire_reads where supplier_id = $1 order by created_at`, [supplierId]),
   ]);
-  const priced = new Set(cells.map((r) => Number(r.line_no)));
-  const terms = new Set(subs.flatMap((x) => Object.entries(x.terms ?? {}).filter(([, v]) => v !== null && v !== undefined && v !== "").map(([k]) => k)));
-  const answeredQs = new Set(reads.flatMap((x) => (x.answers ?? []).filter((a) => a.answer).map((a) => String(a.questionNo))));
-  const done = open
-    .filter((c) => (c.items ?? []).length > 0 && (c.items ?? []).every((i) =>
-      i.lineNos?.length ? i.lineNos.every((n) => priced.has(n))
-        : i.termKey ? terms.has(i.termKey)
-          : i.questionNo ? answeredQs.has(i.questionNo) : false))
-    .map((c) => c.id);
+  const firm = new Set(cells.filter((c) => c.raw_price !== null && !["omitted", "not_quoted", "illegible", "match_rival", "relative"].includes(c.raw_status)).map((c) => Number(c.line_no)));
+  const declined = new Set(cells.filter((c) => c.raw_status === "not_quoted").map((c) => Number(c.line_no)));
+  const terms = latest?.terms ?? {};
+  // Later readings fill in earlier ones, question by question.
+  const answer = new Map<string, { answer: boolean; doc: boolean }>();
+  for (const r of reads) for (const a of r.answers ?? []) {
+    const k = String(a.questionNo);
+    const prev = answer.get(k) ?? { answer: false, doc: false };
+    answer.set(k, { answer: prev.answer || Boolean(a.answer), doc: prev.doc || Boolean(a.attachedDocument) });
+  }
+  const isAnswered = (i: ChaseItem): boolean => {
+    switch (i.kind) {
+      case "price_missing": return (i.lineNos ?? []).length > 0 && i.lineNos!.every((n) => firm.has(n) || declined.has(n));
+      case "price_unreadable":
+      case "price_not_a_price":
+      case "price_derived_unconfirmed": return (i.lineNos ?? []).length > 0 && i.lineNos!.every((n) => firm.has(n));
+      case "price_carried_forward": return false;
+      case "term_not_stated": {
+        const v = i.termKey ? terms[i.termKey] : undefined;
+        return v !== undefined && v !== null && !VAGUE.test(String(v));
+      }
+      case "questionnaire_unanswered": return Boolean(i.questionNo && answer.get(i.questionNo)?.answer);
+      case "questionnaire_no_document": return Boolean(i.questionNo && answer.get(i.questionNo)?.doc);
+      default: return false;
+    }
+  };
+  const done = open.filter((c) => (c.items ?? []).length > 0 && (c.items ?? []).every(isAnswered)).map((c) => c.id);
   if (done.length) await q(`update chases set answered_at = now() where id = any($1::text[])`, [done]);
 }
 
