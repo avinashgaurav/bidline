@@ -4,9 +4,8 @@ import { ChevronRight } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { NotFound, getLineNotes, qualityGate, resolveRfx } from "@/lib/rfx";
 import { loadComparison } from "@/lib/comparison";
-import { listEvents, versionOf } from "@/lib/events";
+import { listEvents } from "@/lib/events";
 import { gridView, inrShort } from "@/lib/view";
-import { LiveRefresh } from "@/components/live-refresh";
 import { ComparisonGrid } from "@/components/rfx/grid";
 import { DocumentsTab } from "@/components/rfx/documents";
 import { LinesTab } from "@/components/rfx/lines";
@@ -15,14 +14,21 @@ import { QuestionnaireTab } from "@/components/rfx/questionnaire";
 import { ChaseTab } from "@/components/rfx/chase";
 import { AwardTab } from "@/components/rfx/award";
 import { AssumptionsTab } from "@/components/rfx/assumptions";
-import { ActivityList } from "@/components/activity-list";
 import { EVENT_STEPS } from "@/lib/event-steps";
 import { AskBox } from "@/components/rfx/ask";
 import { ExportMenu } from "@/components/export-menu";
 import { InfoTip, Tip } from "@/components/tip";
 import { NextStep } from "@/components/rfx/next-step";
 import { OverviewTab } from "@/components/rfx/overview";
-import { AuditPanel } from "@/components/rfx/audit-panel";
+import { AuditRail, AuditSheetButton } from "@/components/rfx/audit-panel";
+import { EventTabs, type TabSpec } from "@/components/rfx/event-tabs";
+import { AccessButton, ArchiveButton } from "@/components/rfx/event-actions";
+import { eventAccess, listMembers } from "@/lib/team";
+import { can } from "@/lib/roles";
+import { one } from "@/lib/db";
+import { StarButton } from "@/components/star-button";
+import { STAGE } from "@/lib/stages";
+import { Archive, Eye } from "lucide-react";
 import { DuplicateButton } from "@/components/rfx/edit-extras";
 import { SUGGESTIONS } from "@/lib/insights";
 
@@ -54,9 +60,17 @@ export default async function RfxPage({ params, searchParams }: {
     if (e instanceof NotFound) notFound();
     throw e;
   });
-  const [cmp, version, audit, notes] = await Promise.all([
-    loadComparison(rfx), versionOf({ rfxId: rfx.id }), listEvents({ rfxId: rfx.id, limit: 200 }), getLineNotes(rfx.id),
+  const canEdit = can(rfx.my_role, "edit");
+  const isAdmin = can(rfx.my_role, "team");
+  const [cmp, audit, notes, team, access, star] = await Promise.all([
+    loadComparison(rfx), listEvents({ rfxId: rfx.id, limit: 300 }), getLineNotes(rfx.id),
+    isAdmin ? listMembers(user.id) : Promise.resolve(null), isAdmin ? eventAccess(user.id, rfx.id) : Promise.resolve(null),
+    one<{ on: boolean }>("select exists (select 1 from rfx_stars where user_id = $1 and rfx_id = $2) as on", [user.id, rfx.id]),
   ]);
+  const feed = audit.map((e) => ({
+    id: e.id, rfx_id: e.rfx_id, rfx_code: rfx.code, user_name: e.user_name ?? null, actor: e.actor, kind: e.kind, tool: e.tool,
+    user_request: e.user_request, summary: e.summary, detail: (e.detail ?? {}) as Record<string, unknown>, created_at: e.created_at,
+  }));
   const tab = TABS.some(([k]) => k === sp.tab) ? sp.tab! : "overview";
   const unread = cmp.documents.filter((d) => d.status === "unread").length;
   const gate = qualityGate(cmp.lines);
@@ -78,105 +92,101 @@ export default async function RfxPage({ params, searchParams }: {
     award: latestAward ? { label: latestAward.status === "sent" ? "Awaiting approval" : latestAward.status.replace("_", " "), tone: latestAward.status } : {},
   };
 
-  return (
-    <div className="grid gap-5">
-      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
-        <div className="min-w-0">
-          <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
-            <Link href="/" className="hover:text-primary">Sourcing events</Link>
-            <ChevronRight className="size-3.5 opacity-60" />
-            <span className="num">{rfx.code}</span>
-          </nav>
-          <h1 className="mt-1.5 text-[24px] leading-tight text-balance">{rfx.title}</h1>
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px] text-ink-secondary">
-            <Tip text={EVENT_TYPE_HELP[rfx.event_type] ?? "Type of sourcing event"}>
-              <span tabIndex={0} className="rounded-md bg-night px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-on-dark">{rfx.event_type}</span>
-            </Tip>
-            <Tip text={STATUS_HELP[rfx.status] ?? "Where this event is"}>
-              <span tabIndex={0} className="rounded-full bg-secondary px-2 py-0.5 text-xs capitalize text-primary">{rfx.status}</span>
-            </Tip>
-            {rfx.created_via === "claude" ? <span className="rounded-full bg-muted px-2 py-0.5 text-xs">Created in Claude</span> : null}
-            {rfx.created_via === "demo" ? <Tip text="Fictional data for trying Bidline. Follow-up emails go to your own address."><span tabIndex={0} className="rounded-full bg-lavender px-2 py-0.5 text-xs text-primary">Demo</span></Tip> : null}
-            <span>{cmp.lines.length} line items</span>
-            <span aria-hidden>·</span>
-            <span>{cmp.suppliers.filter((s) => s.status === "responded").length} of {cmp.suppliers.length} suppliers quoted</span>
-            {rfx.due_at ? <><span aria-hidden>·</span><span>Due {new Date(rfx.due_at).toLocaleDateString("en-IN", { dateStyle: "medium" })}</span></> : null}
-            {approver ? <><span aria-hidden>·</span><span>Approver {approver}</span></> : null}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <LiveRefresh url={`/api/rfx/${rfx.id}/version`} initial={version} />
-          <DuplicateButton rfxId={rfx.id} title={rfx.title} />
-          <AuditPanel rfxId={rfx.id} buyerName={user.name} entries={audit.map((e) => ({
-            id: Number(e.id), actor: e.actor, kind: e.kind, tool: e.tool, user_request: e.user_request, summary: e.summary,
-            detail: (e.detail ?? {}) as Record<string, unknown>, created_at: e.created_at,
-          }))} />
-          <ExportMenu rfxId={rfx.id} />
-        </div>
-      </header>
-
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border ring-1 ring-border lg:grid-cols-5">
-        <Kpi label="Lowest total, all suppliers" help="The cheapest price on every line, whichever supplier offered it. Ignores qualification. Prices that need review are left out."
-          value={cmp.hasAnyReading ? inrShort(c.naive.totalInr) : "Not yet"} sub={cmp.hasAnyReading ? `${c.naive.linesAwarded} of ${cmp.lines.length} lines priced` : "No quotes read yet"} />
-        <Kpi label="Lowest total, qualified only" help="The same, using only suppliers who pass the questionnaire (certificates, warranty, delivery). This is the basis for a defensible award."
-          value={!cmp.questions.length ? "No questionnaire" : showQualified ? inrShort(c.compliant.totalInr) : "Pending"}
-          sub={!cmp.questions.length ? "Add questions to qualify suppliers" : showQualified ? `${c.compliant.linesAwarded} of ${cmp.lines.length} lines · ${c.qualifiedVendors.length} qualified` : "No questionnaire answers read yet"} />
-        <Kpi label="Cost of qualifying" help="How much more the qualified total costs than the lowest total. What you pay for choosing compliant suppliers."
-          value={showQualified && c.naive.totalInr && c.compliant.linesAwarded ? inrShort(c.deltaInr) : "n/a"}
-          sub={showQualified && c.likeForLike.warning ? "Covers different lines, see Award" : showQualified ? "Qualified minus lowest" : "Needs questionnaire answers"} />
-        <Kpi label="Needs review" help="Prices Bidline will not count until a person checks them: unreadable, two readings disagree, no source quoted, or not a firm price."
-          value={String(needsPerson)} sub={needsPerson ? "Kept out of all totals" : "Nothing to check"} warn={needsPerson > 0} href={needsPerson ? `/rfx/${rfx.id}?tab=comparison` : undefined} />
-        <Kpi label="Unread documents" help="Supplier files uploaded but not yet read. Bidline has no AI inside: ask your Claude to read them."
-          value={String(unread)} sub={unread ? "Ask Claude to read them" : "All read"} warn={unread > 0} href={unread ? `/rfx/${rfx.id}?tab=documents` : undefined} className="col-span-2 lg:col-span-1" />
-      </div>
-
-      {c.likeForLike.warning && showQualified && c.compliant.linesAwarded > 0 && c.naive.linesAwarded > 0 ? (
-        <p className="rounded-xl bg-[var(--cell-review-bg)] px-4 py-3 text-sm ring-1 ring-[var(--cell-review)]/25">{c.likeForLike.warning}</p>
-      ) : null}
-
-      <NextStep rfx={rfx} cmp={cmp} unread={unread} needsPerson={needsPerson} openItems={openItems} gate={gate.length} />
-
-      <nav className="-mx-1 flex gap-0.5 overflow-x-auto border-b border-border px-1" aria-label="Event steps">
-        {EVENT_STEPS.map((s) => {
-          const k = counts[s.tab] ?? {};
-          const active = tab === s.tab;
-          return (
-            <Tip key={s.tab} text={s.help} side="bottom">
-              <Link
-                href={`/rfx/${rfx.id}?tab=${s.tab}`}
-                aria-current={active ? "page" : undefined}
-                className={`-mb-px inline-flex items-center gap-1.5 whitespace-nowrap border-b-2 px-3 py-2.5 text-[14px] transition-colors ${
-                  active ? "border-primary text-foreground" : "border-transparent text-ink-secondary hover:text-foreground"
-                }`}
-              >
-                {s.label}
-                {k.n !== undefined && k.n > 0 ? (
-                  <span className={`num rounded-full px-1.5 text-[11px] leading-[18px] ${k.warn ? "bg-warning/10 text-warning" : "bg-muted text-ink-secondary"}`}>{k.n}</span>
-                ) : null}
-                {k.label ? (
-                  <span className={`rounded-full px-1.5 text-[11px] leading-[18px] capitalize ${
-                    k.tone === "approved" ? "bg-success/10 text-success" : k.tone === "sent" || k.tone === "changes_requested" ? "bg-warning/10 text-warning"
-                      : k.tone === "rejected" ? "bg-destructive/10 text-destructive" : "bg-muted text-ink-secondary"
-                  }`}>{k.label}</span>
-                ) : null}
-              </Link>
-            </Tip>
-          );
-        })}
-      </nav>
-
-      {cmp.hasAnyReading && tab === "comparison" ? <AskBox rfxId={rfx.id} code={rfx.code} suggestions={SUGGESTIONS} /> : null}
-
+  const tabs: TabSpec[] = EVENT_STEPS.map((st) => {
+    const k = counts[st.tab] ?? {};
+    return { tab: st.tab, label: st.label, help: st.help, n: k.n, warn: k.warn, badge: k.label, tone: k.tone };
+  });
+  const stage = STAGE[rfx.status] ?? STAGE.draft;
+  // Approvers may add notes on line items and decide awards; everything else is read-only for them.
+  const readOnly = !canEdit && !(tab === "award" || (tab === "lines" && can(rfx.my_role, "note")));
+  const content = (
+    <>
       {tab === "overview" ? <OverviewTab cmp={cmp} /> : null}
       {tab === "comparison" ? <ComparisonGrid view={gridView(cmp)} /> : null}
-      {tab === "documents" ? <DocumentsTab cmp={cmp} /> : null}
+      {tab === "documents" ? <DocumentsTab cmp={cmp} canEdit={canEdit} /> : null}
       {tab === "lines" ? <LinesTab cmp={cmp} gate={gate} notes={notes} buyerName={user.name} /> : null}
       {tab === "suppliers" ? <SuppliersTab cmp={cmp} /> : null}
       {tab === "questionnaire" ? <QuestionnaireTab cmp={cmp} /> : null}
-      {tab === "chase" ? <ChaseTab cmp={cmp} /> : null}
-      {tab === "award" ? <AwardTab cmp={cmp} /> : null}
+      {tab === "chase" ? <ChaseTab cmp={cmp} canEdit={canEdit} /> : null}
+      {tab === "award" ? <AwardTab cmp={cmp} canEdit={canEdit} canApprove={can(rfx.my_role, "approve")} /> : null}
       {tab === "assumptions" ? <AssumptionsTab cmp={cmp} /> : null}
-      {tab === "activity" ? <ActivityTab rfxId={rfx.id} who={sp.who} /> : null}
+    </>
+  );
+
+  return (
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="@container grid min-w-0 content-start gap-4">
+        <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+          <div className="min-w-0">
+            <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-[12.5px] text-ink-secondary">
+              <Link href="/events" className="hover:text-primary">Sourcing events</Link>
+              <ChevronRight className="size-3.5 opacity-60" />
+              <span className="num">{rfx.code}</span>
+            </nav>
+            <h1 className="mt-1 text-[22px] leading-tight tracking-[-0.01em] text-balance sm:text-[24px]">{rfx.title}</h1>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[12.5px] text-ink-secondary">
+              <Tip text={EVENT_TYPE_HELP[rfx.event_type] ?? "Type of sourcing event"}>
+                <span tabIndex={0} className="rounded bg-night px-1.5 py-px text-[10.5px] font-medium tracking-wide text-on-dark">{rfx.event_type}</span>
+              </Tip>
+              <Tip text={STATUS_HELP[rfx.status] ?? stage.help}>
+                <span tabIndex={0} className={`inline-flex items-center gap-1.5 rounded-full px-2 py-px text-[12px] ${stage.chip}`}><span className={`size-1.5 rounded-full ${stage.dot}`} />{stage.label}</span>
+              </Tip>
+              {rfx.created_via === "claude" ? <span className="rounded-full bg-muted px-2 py-px text-[12px]">Created in Claude</span> : null}
+              {rfx.created_via === "demo" ? <Tip text="Fictional data for trying Bidline. Follow-up emails go to your own address."><span tabIndex={0} className="rounded-full bg-lavender px-2 py-px text-[12px] text-primary">Demo</span></Tip> : null}
+              <span>{cmp.lines.length} line items</span>
+              <span aria-hidden>·</span>
+              <span>{cmp.suppliers.filter((x) => x.status === "responded").length} of {cmp.suppliers.length} suppliers quoted</span>
+              {rfx.due_at ? <><span aria-hidden>·</span><span>Due {new Date(rfx.due_at).toLocaleDateString("en-IN", { dateStyle: "medium" })}</span></> : null}
+              {approver ? <><span aria-hidden>·</span><span>Approver {approver}</span></> : null}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <StarButton rfxId={rfx.id} starred={Boolean(star?.on)} />
+            <AuditSheetButton rfxId={rfx.id} entries={feed} />
+            {isAdmin && team && access ? (
+              <AccessButton rfxId={rfx.id} restricted={access.restricted} people={access.people} createdBy={access.createdBy} members={team.members} />
+            ) : null}
+            {canEdit ? <DuplicateButton rfxId={rfx.id} title={rfx.title} /> : null}
+            {canEdit ? <ArchiveButton rfxId={rfx.id} archived={Boolean(rfx.archived_at)} /> : null}
+            <ExportMenu rfxId={rfx.id} />
+          </div>
+        </header>
+
+        {rfx.archived_at ? (
+          <p className="flex items-center gap-2 rounded-xl bg-muted px-4 py-2.5 text-[13.5px]"><Archive className="size-4 text-ink-secondary" /> Archived on {new Date(rfx.archived_at).toLocaleDateString("en-IN", { dateStyle: "medium" })}. It is kept with its full record; restore it to work on it again.</p>
+        ) : null}
+        {!canEdit ? (
+          <p className="flex items-center gap-2 rounded-xl bg-lavender px-4 py-2.5 text-[13.5px]"><Eye className="size-4 text-primary" /> You can view this event{can(rfx.my_role, "approve") ? ", add notes and decide its award" : ""}. Editing needs the Buyer or Admin role.</p>
+        ) : null}
+
+        <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border ring-1 ring-border @2xl:grid-cols-3 @5xl:grid-cols-5">
+          <Kpi label="Lowest total, all suppliers" help="The cheapest price on every line, whichever supplier offered it. Ignores qualification. Prices that need review are left out."
+            value={cmp.hasAnyReading ? inrShort(c.naive.totalInr) : "Not yet"} sub={cmp.hasAnyReading ? `${c.naive.linesAwarded} of ${cmp.lines.length} lines priced` : "No quotes read yet"} />
+          <Kpi label="Lowest total, qualified only" help="The same, using only suppliers who pass the questionnaire (certificates, warranty, delivery). This is the basis for a defensible award."
+            value={!cmp.questions.length ? "No questionnaire" : showQualified ? inrShort(c.compliant.totalInr) : "Pending"}
+            sub={!cmp.questions.length ? "Add questions to qualify suppliers" : showQualified ? `${c.compliant.linesAwarded} of ${cmp.lines.length} lines · ${c.qualifiedVendors.length} qualified` : "No questionnaire answers read yet"} />
+          <Kpi label="Cost of qualifying" help="How much more the qualified total costs than the lowest total. What you pay for choosing compliant suppliers."
+            value={showQualified && c.naive.totalInr && c.compliant.linesAwarded ? inrShort(c.deltaInr) : "n/a"}
+            sub={showQualified && c.likeForLike.warning ? "Covers different lines, see Award" : showQualified ? "Qualified minus lowest" : "Needs questionnaire answers"} />
+          <Kpi label="Needs review" help="Prices Bidline will not count until a person checks them: unreadable, two readings disagree, no source quoted, or not a firm price."
+            value={String(needsPerson)} sub={needsPerson ? "Kept out of all totals" : "Nothing to check"} warn={needsPerson > 0} href={needsPerson ? `/rfx/${rfx.id}?tab=comparison` : undefined} />
+          <Kpi label="Unread documents" help="Supplier files uploaded but not yet read. Bidline has no AI inside: ask your Claude to read them."
+            value={String(unread)} sub={unread ? "Ask Claude to read them" : "All read"} warn={unread > 0} href={unread ? `/rfx/${rfx.id}?tab=documents` : undefined} className="col-span-2 @5xl:col-span-1" />
+        </div>
+
+        {c.likeForLike.warning && showQualified && c.compliant.linesAwarded > 0 && c.naive.linesAwarded > 0 ? (
+          <p className="rounded-xl bg-[var(--cell-review-bg)] px-4 py-3 text-sm ring-1 ring-[var(--cell-review)]/25">{c.likeForLike.warning}</p>
+        ) : null}
+
+        {canEdit ? <NextStep rfx={rfx} cmp={cmp} unread={unread} needsPerson={needsPerson} openItems={openItems} gate={gate.length} /> : null}
+
+        <EventTabs rfxId={rfx.id} tabs={tabs} active={tab} />
+
+        {cmp.hasAnyReading && tab === "comparison" ? <AskBox rfxId={rfx.id} code={rfx.code} suggestions={SUGGESTIONS} /> : null}
+
+        {readOnly ? <fieldset disabled className="contents">{content}</fieldset> : content}
+      </div>
+      <AuditRail rfxId={rfx.id} entries={feed} />
     </div>
   );
 }
@@ -191,28 +201,4 @@ function Kpi({ label, value, sub, help, warn = false, href, className = "" }: { 
   );
   const cls = `block px-4 py-3 ${warn ? "bg-[var(--cell-review-bg)]" : "bg-card"} ${className}`;
   return href ? <Link href={href} className={`${cls} hover:bg-[#fbf1dc]`}>{body}</Link> : <div className={cls}>{body}</div>;
-}
-
-async function ActivityTab({ rfxId, who }: { rfxId: string; who?: string }) {
-  let events = await listEvents({ rfxId, limit: 300 });
-  if (who === "claude") events = events.filter((e) => e.actor === "claude");
-  if (who === "app") events = events.filter((e) => e.actor === "user" || e.actor === "approver");
-  const filters = [["", "All"], ["claude", "From Claude"], ["app", "From the app"]];
-  return (
-    <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
-      <div className="rounded-xl bg-card p-4 ring-1 ring-border sm:p-5">
-        <div className="mb-4 flex flex-wrap gap-2">
-          {filters.map(([k, l]) => (
-            <Link key={k} href={`/rfx/${rfxId}?tab=activity${k ? `&who=${k}` : ""}`} className={`rounded-full px-3 py-1 text-sm ${(who ?? "") === k ? "bg-primary text-white" : "bg-secondary"}`}>{l}</Link>
-          ))}
-        </div>
-        <ActivityList events={events} />
-      </div>
-      <aside className="h-fit rounded-xl bg-lavender p-5 text-sm">
-        <p className="font-medium">Activity log</p>
-        <p className="mt-1 text-ink-secondary">Every request made in Claude, every action Bidline took, every edit in the app and every approval, in date order.</p>
-        <a href={`/api/rfx/${rfxId}/export/transcript`} className="mt-3 inline-flex h-9 items-center rounded-full bg-primary px-4 text-white">Download activity log (.md)</a>
-      </aside>
-    </div>
-  );
 }

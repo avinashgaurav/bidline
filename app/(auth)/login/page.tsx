@@ -8,8 +8,10 @@ export default async function LoginPage() {
   if (await currentUser()) redirect("/");
   return (
     <>
-      <h2 className="text-[28px]">Sign in</h2>
-      <p className="mt-1 mb-6 text-sm text-ink-secondary">Sign in to see your sourcing events.</p>
+      <h1 className="text-[28px] leading-tight">Sign in to Bidline</h1>
+      <p className="mt-2 mb-8 text-[15px] leading-relaxed text-ink-secondary">
+        Your sourcing events, comparisons and approvals are where you left them.
+      </p>
       <AuthForm mode="login" />
     </>
   );

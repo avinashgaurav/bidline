@@ -8,7 +8,13 @@ import type { QuestionSpec } from "./calc/questionnaire";
 
 export interface RfxRow {
   id: string;
+  /** Who created it. The event belongs to the workspace. */
   user_id: string;
+  workspace_id: string;
+  /** Visible only to admins, the creator and people given access. */
+  restricted: boolean;
+  /** Put away: out of the lists, record kept. */
+  archived_at: string | null;
   code: string;
   title: string;
   status: string;
@@ -57,22 +63,33 @@ export class NotFound extends Error {}
 export class BadInput extends Error {}
 
 // ---------------------------------------------------------------------------
-// Lookup. Every read is scoped to the signed-in user (or the MCP token's user).
+// Lookup. Every read is scoped to the signed-in person's workspace (or the MCP
+// token's), and a restricted event only to the people allowed to see it.
 // ---------------------------------------------------------------------------
+
+/** `me` (the person and their role) for a query whose $1 is the user id. */
+export const ME_CTE = `me as (
+  select u.id, u.workspace_id, m.role from users u
+  join workspace_members m on m.workspace_id = u.workspace_id and m.user_id = u.id
+  where u.id = $1)`;
+
+/** True when the person in `me` may see event `r`. */
+export const VISIBLE = `(r.workspace_id = me.workspace_id and (not r.restricted or me.role = 'admin' or r.user_id = me.id
+  or exists (select 1 from rfx_access a where a.rfx_id = r.id and a.user_id = me.id)))`;
 
 /**
  * Find an RFx by id or by its code ("RFX-2026-0142"). With no reference, the
  * one most recently touched: what someone means by "the RFx" in a chat.
  */
-export async function resolveRfx(userId: string, ref?: string | null): Promise<RfxRow> {
+export async function resolveRfx(userId: string, ref?: string | null): Promise<RfxRow & { my_role: string }> {
   const r = ref?.trim();
   const row = r
-    ? await one<RfxRow>(
-        `select * from rfx where user_id = $1 and (id = $2 or lower(code) = lower($2)) limit 1`,
+    ? await one<RfxRow & { my_role: string }>(
+        `with ${ME_CTE} select r.*, me.role as my_role from rfx r, me where ${VISIBLE} and (r.id = $2 or lower(r.code) = lower($2)) limit 1`,
         [userId, r],
       )
-    : await one<RfxRow>(
-        `select * from rfx where user_id = $1 and status <> 'closed' order by updated_at desc limit 1`,
+    : await one<RfxRow & { my_role: string }>(
+        `with ${ME_CTE} select r.*, me.role as my_role from rfx r, me where ${VISIBLE} and r.status <> 'closed' order by r.updated_at desc limit 1`,
         [userId],
       );
   if (!row) {
@@ -85,15 +102,34 @@ export async function resolveRfx(userId: string, ref?: string | null): Promise<R
   return row;
 }
 
-export async function listRfxs(userId: string) {
-  return q<RfxRow & { line_count: number; supplier_count: number; responded: number; unread_docs: number; award_status: string | null }>(
-    `select r.*,
+export interface RfxListRow extends RfxRow {
+  line_count: number; supplier_count: number; responded: number; doc_count: number; unread_docs: number;
+  award_status: string | null; award_total_inr: number | null; award_baseline_inr: number | null; budget_inr: number; question_count: number;
+  open_chases: number; overdue_chases: number; needs_review: number; owner_name: string | null; last_activity: string | null;
+  starred: boolean;
+}
+
+export async function listRfxs(userId: string): Promise<RfxListRow[]> {
+  return q<RfxListRow>(
+    `with ${ME_CTE} select r.*,
        (select count(*)::int from rfx_lines l where l.rfx_id = r.id) as line_count,
        (select count(*)::int from suppliers s where s.rfx_id = r.id and s.status <> 'removed') as supplier_count,
        (select count(*)::int from suppliers s where s.rfx_id = r.id and s.status = 'responded') as responded,
+       (select count(*)::int from documents d where d.rfx_id = r.id) as doc_count,
        (select count(*)::int from documents d where d.rfx_id = r.id and d.status = 'unread') as unread_docs,
-       (select a.status from awards a where a.rfx_id = r.id order by a.created_at desc limit 1) as award_status
-     from rfx r where r.user_id = $1 order by r.updated_at desc`,
+       (select a.status from awards a where a.rfx_id = r.id order by a.created_at desc limit 1) as award_status,
+       (select (a.snapshot->>'totalInr')::numeric from awards a where a.rfx_id = r.id order by a.created_at desc limit 1)::float8 as award_total_inr,
+       (select (a.snapshot->>'baselineForAwardedInr')::numeric from awards a where a.rfx_id = r.id order by a.created_at desc limit 1)::float8 as award_baseline_inr,
+       (select coalesce(sum(l.qty * l.baseline_inr), 0) from rfx_lines l where l.rfx_id = r.id)::float8 as budget_inr,
+       (select count(*)::int from rfx_questions x where x.rfx_id = r.id) as question_count,
+       (select count(*)::int from chases c where c.rfx_id = r.id and c.answered_at is null) as open_chases,
+       (select count(*)::int from chases c where c.rfx_id = r.id and c.answered_at is null and c.due_at < now()) as overdue_chases,
+       (select count(*)::int from quote_cells qc join submissions s on s.id = qc.submission_id
+          where qc.rfx_id = r.id and not s.superseded and qc.raw_status = 'illegible') as needs_review,
+       (select u.name from users u where u.id = r.user_id) as owner_name,
+       (select max(e.created_at) from events e where e.rfx_id = r.id) as last_activity,
+       exists (select 1 from rfx_stars st where st.rfx_id = r.id and st.user_id = me.id) as starred
+     from rfx r, me where ${VISIBLE} order by r.updated_at desc`,
     [userId],
   );
 }
@@ -215,7 +251,7 @@ export async function nextRfxCode(userId: string): Promise<string> {
   const year = new Date().getFullYear();
   for (let i = 0; i < 20; i++) {
     const code = `RFX-${year}-${String(Math.floor(1000 + Math.random() * 9000))}`;
-    const clash = await one("select 1 from rfx where user_id = $1 and code = $2", [userId, code]);
+    const clash = await one("select 1 from rfx where workspace_id = (select workspace_id from users where id = $1) and code = $2", [userId, code]);
     if (!clash) return code;
   }
   return `RFX-${year}-${Date.now() % 100000}`;
@@ -242,8 +278,8 @@ export async function createRfx(userId: string, input: {
   const type = (input.eventType ?? "RFQ").toUpperCase();
   if (!(EVENT_TYPES as readonly string[]).includes(type)) throw new BadInput(`Event type must be one of ${EVENT_TYPES.join(", ")}.`);
   await q(
-    `insert into rfx (id, user_id, code, title, event_type, buyer, approver, terms_asked, notes, due_at, created_via)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+    `insert into rfx (id, user_id, workspace_id, code, title, event_type, buyer, approver, terms_asked, notes, due_at, created_via)
+     values ($1,$2,(select workspace_id from users where id = $2),$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [
       id, userId, code, input.title.trim(), type, json(input.buyer ?? {}), json(input.approver ?? {}),
       json(input.termsAsked ?? {}), input.notes ?? null, input.dueDate || null, input.createdVia,

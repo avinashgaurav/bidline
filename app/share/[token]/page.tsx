@@ -19,7 +19,7 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   const a = await one<AwardShare>(
     `select a.note_md, a.status, a.decided_by, a.decided_at, a.decision_note, a.created_at, a.snapshot,
             r.code, r.title, r.approver, r.buyer
-       from awards a join rfx r on r.id = a.rfx_id where a.share_token = $1`,
+       from awards a join rfx r on r.id = a.rfx_id where a.share_token = $1 or a.id = (select award_id from award_steps where token = $1)`,
     [token],
   );
   if (!a) notFound();
@@ -46,10 +46,10 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           <div className="rounded-xl bg-card p-6 ring-1 ring-border">
             {decided ? (
               <div className="grid gap-2 text-sm">
-                <p className="eyebrow">{a.status === "withdrawn" ? "Withdrawn" : "Decision"}</p>
-                <p className="text-[18px] capitalize">{a.status === "withdrawn" ? "The buyer withdrew this award" : a.status.replace(/_/g, " ")}</p>
+                <p className="eyebrow">{a.status === "withdrawn" ? "Withdrawn" : a.status === "expired" ? "Expired" : "Decision"}</p>
+                <p className="text-[18px] capitalize">{a.status === "withdrawn" ? "The buyer withdrew this award" : a.status === "expired" ? "This approval request expired" : a.status.replace(/_/g, " ")}</p>
                 <p className="text-ink-secondary">
-                  {a.status === "withdrawn" ? "No decision is needed. A revised award will come with a new link." : `by ${a.decided_by}`}
+                  {a.status === "withdrawn" ? "No decision is needed. A revised award will come with a new link." : a.status === "expired" ? (a.decision_note ?? "No decision is needed. A fresh request will come with a new link.") : `by ${a.decided_by}`}
                   {" "}on {a.decided_at ? new Date(a.decided_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : ""}
                 </p>
                 {a.decision_note ? <p>&ldquo;{a.decision_note}&rdquo;</p> : null}

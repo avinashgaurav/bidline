@@ -1,3 +1,4 @@
+import { findOutliers } from "./calc/outliers";
 import type { Comparison, CellInfo } from "./comparison";
 import { cellKey } from "./comparison";
 import type { NormStep, RawQuote } from "./calc/normalise";
@@ -13,6 +14,8 @@ export interface CellView {
   trace: NormStep[];
   raw: { price?: number; uom?: string; ccy?: string } | null;
   info: CellInfo | null;
+  /** Unusually low or high for this line (lib/calc/outliers.ts). */
+  outlier?: { kind: "low" | "high"; note: string } | null;
 }
 
 export interface SupplierView {
@@ -70,6 +73,14 @@ export function gridView(cmp: Comparison): GridView {
       }
     }
     best[l.no] = bestCode;
+  }
+  const prices = Object.entries(cells).map(([k, c]) => ({
+    lineNo: Number(k.split(":")[1]), supplier: k.split(":")[0], unitInr: c.unitInr,
+    comparable: c.status === "comparable" || c.status === "comparable_with_caveat",
+  }));
+  for (const o of findOutliers(cmp.lines, prices)) {
+    const c = cells[cellKey(o.supplier, o.lineNo)];
+    if (c) c.outlier = { kind: o.kind, note: o.note };
   }
   return {
     rfxId: cmp.rfx.id,

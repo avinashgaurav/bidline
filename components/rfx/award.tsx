@@ -5,14 +5,17 @@ import { CopyButton } from "@/components/copy-button";
 import { Markdown } from "@/components/markdown";
 import { AwardForm } from "./award-client";
 import { WithdrawAward } from "./edit-extras";
+import { DecideAward } from "./event-actions";
+import { stepsOf } from "@/lib/approvals";
 
 const STATUS: Record<string, string> = {
   sent: "bg-warning/10 text-warning", approved: "bg-success/10 text-success",
-  rejected: "bg-destructive/10 text-destructive", changes_requested: "bg-warning/10 text-warning", withdrawn: "bg-muted text-ink-secondary",
+  rejected: "bg-destructive/10 text-destructive", changes_requested: "bg-warning/10 text-warning", withdrawn: "bg-muted text-ink-secondary", expired: "bg-muted text-ink-secondary",
 };
 
-export async function AwardTab({ cmp }: { cmp: Comparison }) {
+export async function AwardTab({ cmp, canEdit, canApprove }: { cmp: Comparison; canEdit: boolean; canApprove: boolean }) {
   const base = await appUrlFromHeaders();
+  const steps = new Map(await Promise.all(cmp.awards.map(async (a) => [a.id, await stepsOf(a.id)] as const)));
   const c = cmp.compliance;
   const options = [
     { label: c.naive.label, total: c.naive.totalInr, lines: c.naive.linesAwarded },
@@ -45,12 +48,16 @@ export async function AwardTab({ cmp }: { cmp: Comparison }) {
           </div>
         ) : null}
       </section>
-      <section className="rounded-xl bg-card p-4 ring-1 sm:p-5 ring-border">
-        <p className="eyebrow mb-3">Draft award</p>
-        <AwardForm rfxId={cmp.rfx.id} suppliers={cmp.suppliers.map((s) => ({ code: s.code, name: s.name }))} hasQuestions={cmp.questions.length > 0} />
-      </section>
+      {canEdit ? (
+        <section className="rounded-xl bg-card p-4 ring-1 sm:p-5 ring-border">
+          <p className="eyebrow mb-3">Draft award</p>
+          <AwardForm rfxId={cmp.rfx.id} suppliers={cmp.suppliers.map((s) => ({ code: s.code, name: s.name }))} hasQuestions={cmp.questions.length > 0} />
+        </section>
+      ) : null}
       {cmp.awards.map((a) => {
         const link = `${base}/share/${a.share_token}`;
+        const st = steps.get(a.id) ?? [];
+        const waiting = st.find((x) => x.status === "sent");
         return (
           <section key={a.id} className="grid gap-4 rounded-xl bg-card p-4 ring-1 sm:p-5 ring-border">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -59,13 +66,30 @@ export async function AwardTab({ cmp }: { cmp: Comparison }) {
                 <p className="mt-1 text-sm">{(a.snapshot as { label?: string }).label} · <span className="num">{inr((a.snapshot as { totalInr?: number }).totalInr ?? 0)}</span></p>
               </div>
               <span className="flex items-center gap-2">
-                {a.status === "sent" ? <WithdrawAward rfxId={cmp.rfx.id} awardId={a.id} /> : null}
+                {a.status === "sent" && canEdit ? <WithdrawAward rfxId={cmp.rfx.id} awardId={a.id} /> : null}
                 <span className={`rounded-full px-3 py-1 text-xs capitalize ${STATUS[a.status] ?? "bg-muted"}`}>
                   {a.status === "sent" ? "Awaiting approval" : a.status.replace(/_/g, " ")}{a.decided_by ? ` by ${a.decided_by}` : ""}
                 </span>
               </span>
             </div>
-            {a.decision_note ? <p className="text-sm">{a.status === "withdrawn" ? "Reason for withdrawing" : "Approver's note"}: &ldquo;{a.decision_note}&rdquo;</p> : null}
+            {(a.snapshot as { limitWarning?: string | null }).limitWarning ? (
+              <p className="cell-review rounded-lg p-3 text-[13px]">{(a.snapshot as { limitWarning?: string }).limitWarning}</p>
+            ) : null}
+            {st.length ? (
+              <ol className="grid gap-1.5 rounded-lg bg-muted/60 p-3 text-[13px]">
+                <li className="text-[12px] text-ink-secondary">Approval in {st.length} steps (workspace thresholds)</li>
+                {st.map((x) => (
+                  <li key={x.id} className="flex flex-wrap items-center gap-2">
+                    <span className="num grid size-5 place-items-center rounded-full bg-card text-[11px]">{x.step + 1}</span>
+                    <span className="font-medium">{x.name}</span>{x.above_inr !== null ? <span className="text-ink-secondary">over {inr(Number(x.above_inr))}</span> : null}
+                    <span className={`rounded-full px-2 py-px text-[11.5px] capitalize ${STATUS[x.status] ?? "bg-card text-ink-secondary"}`}>{x.status === "sent" ? "Deciding now" : x.status.replace(/_/g, " ")}</span>
+                    {x.step > 0 && x.status !== "cancelled" ? <CopyButton text={`${base}/share/${x.token}`} label="Copy link" /> : null}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
+            {a.status === "sent" && canApprove ? <DecideAward rfxId={cmp.rfx.id} awardId={a.id} stepLabel={waiting ? `step ${waiting.step + 1} of ${st.length}, as ${waiting.name}` : null} /> : null}
+            {a.decision_note ? <p className="text-sm">{a.status === "withdrawn" ? "Reason for withdrawing" : a.status === "expired" ? "Expired" : "Approver's note"}: &ldquo;{a.decision_note}&rdquo;</p> : null}
             <div className="flex flex-wrap items-center gap-2">
               <code className="min-w-0 flex-1 truncate rounded-lg bg-muted px-3 py-2 text-xs">{link}</code>
               <CopyButton text={link} label="Copy approval link" />

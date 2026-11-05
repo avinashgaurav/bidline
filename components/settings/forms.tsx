@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { CheckCircle2, ExternalLink } from "lucide-react";
-import { disconnectEmailUI, saveDefaultsUI, saveEmailUI, saveProfileUI, sendTestEmailUI, type FormState } from "@/app/actions";
+import { disconnectEmailUI, saveDefaultsUI, saveEmailUI, saveNotifyUI, saveProfileUI, sendTestEmailUI, type FormState } from "@/app/actions";
 import { Field, FormMessage, SubmitButton, areaClass, fieldClass } from "@/components/form-bits";
 import type { EmailAccount, Provider } from "@/lib/mail";
 
@@ -119,5 +119,27 @@ export function EmailForm({ account, providers, defaultName, defaultEmail }: {
         </div>
       ) : null}
     </div>
+  );
+}
+
+export function NotifyForm({ prefs, kinds, mailbox }: {
+  prefs: Record<string, boolean>; kinds: Array<{ key: string; label: string; help: string }>; mailbox: boolean;
+}) {
+  const [state, action] = useActionState<FormState, FormData>(saveNotifyUI, {});
+  return (
+    <form action={action} className="grid gap-3">
+      {!mailbox ? <p className="rounded-lg bg-warning/10 px-3 py-2 text-[13px] text-warning">Connect your mailbox under Integrations first. Notifications are sent from your own mailbox to your own address.</p> : null}
+      <ul className="grid gap-2">
+        {kinds.map((k) => (
+          <li key={k.key}>
+            <label className="flex items-start gap-3 rounded-lg px-1 py-1.5 text-[14px]">
+              <input type="checkbox" name={k.key} defaultChecked={prefs[k.key]} className="mt-1 size-4 accent-[#5266eb]" />
+              <span><span className="block">{k.label}</span><span className="block text-[12.5px] text-ink-secondary">{k.help}</span></span>
+            </label>
+          </li>
+        ))}
+      </ul>
+      <div className="flex flex-wrap items-center gap-3"><SubmitButton>Save notifications</SubmitButton><FormMessage state={state} /></div>
+    </form>
   );
 }

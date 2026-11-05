@@ -56,6 +56,9 @@ function nextStep(rfx: RfxRow, cmp: Comparison, unread: number, needsPerson: num
     return { title: "Award approved", why: `Approved${award.decided_by ? ` by ${award.decided_by}` : ""}. Export the comparison and activity log for your records.`, done: true };
   }
   const redraft = `In Bidline, draft a revised award on ${rfx.code} using qualified suppliers only and give me the new approval link.`;
+  if (award.status === "expired") {
+    return { title: "The approval request expired: send it again", why: "Nobody decided in time. Draft the award again to send a fresh request.", tab: "award", cta: "Open award", prompt: redraft };
+  }
   if (award.status === "withdrawn") {
     return { title: "Award withdrawn: draft a revised one", why: "The earlier approval link no longer accepts a decision. Draft a new award when the figures are final.", tab: "award", cta: "Open award", prompt: redraft };
   }

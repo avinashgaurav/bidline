@@ -40,6 +40,7 @@ export function ComparisonGrid({ view }: { view: GridView }) {
         <Legend cls="cell-best" label="Lowest price" />
         <Legend cls="cell-caveat" label="Off-spec or conditional" />
         <Legend cls="cell-review" label="Needs review, excluded from totals" />
+        <span className="inline-flex items-center gap-1.5"><span className="text-[10px] text-[#c2410c]">▲▼</span>Unusually high or low for the line</span>
         <Legend cls="cell-empty" label="No price" />
         <span className="inline-flex items-center gap-1"><Pencil className="size-3" /> Edited</span>
         <span>Landed unit prices in ₹ per requested unit, ex-GST.</span>
@@ -134,11 +135,12 @@ function GroupRows({ group, view, onOpen }: {
                 <button
                   type="button"
                   onClick={() => onOpen({ code: s.code, lineNo: l.no })}
-                  title={`${action?.label ?? ""}: ${c.flags[0] ?? action?.action ?? ""}`}
+                  title={c.outlier ? `Unusual price: ${c.outlier.note}` : `${action?.label ?? ""}: ${c.flags[0] ?? action?.action ?? ""}`}
                   className="flex h-[34px] w-full items-center justify-end gap-1 px-2.5 hover:underline"
                   aria-label={`${s.name}, line ${l.no}: ${c.unitInr !== null ? `₹${num(c.unitInr)}` : action?.label ?? c.status}. Open details`}
                 >
                   {corrected ? <Pencil className="size-3 text-primary" aria-hidden /> : null}
+                  {c.outlier ? <span aria-label={`Unusually ${c.outlier.kind}`} title={c.outlier.note} className="text-[10px] text-[#c2410c]">{c.outlier.kind === "low" ? "▼" : "▲"}</span> : null}
                   {c.unitInr !== null ? (
                     <span>{num(c.unitInr)}{lowConf ? <sup className="text-warning">?</sup> : null}</span>
                   ) : (

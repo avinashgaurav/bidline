@@ -323,3 +323,228 @@ create table if not exists line_notes (
   created_at timestamptz not null default now()
 );
 create index if not exists line_notes_rfx_idx on line_notes(rfx_id, line_no);
+
+-- ---------------------------------------------------------------------------
+-- Workspaces and roles. A workspace is one organisation; its people each have
+-- one role. Sourcing events belong to the workspace, not to the person who
+-- created them (rfx.user_id stays as "created by").
+--   admin    everything, including the team, Claude tools and restricted events
+--   buyer    create and run sourcing events
+--   approver sees everything, decides awards, adds notes
+--   viewer   read-only
+-- ---------------------------------------------------------------------------
+create table if not exists workspaces (
+  id             text primary key,
+  name           text not null,
+  -- Claude tools an admin has switched off for everyone in the workspace
+  disabled_tools text[] not null default '{}',
+  created_at     timestamptz not null default now()
+);
+
+create table if not exists workspace_members (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  user_id      text not null references users(id) on delete cascade,
+  role         text not null default 'buyer',
+  added_by     text references users(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  primary key (workspace_id, user_id)
+);
+create index if not exists workspace_members_user_idx on workspace_members(user_id);
+
+-- An invite for someone without an account yet. Signing up with that email
+-- joins the workspace with the invited role.
+create table if not exists workspace_invites (
+  id           text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  email        text not null,
+  role         text not null,
+  invited_by   text references users(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  accepted_at  timestamptz,
+  unique (workspace_id, email)
+);
+
+alter table users add column if not exists workspace_id text references workspaces(id) on delete set null;
+alter table rfx add column if not exists workspace_id text references workspaces(id) on delete cascade;
+create index if not exists rfx_workspace_idx on rfx(workspace_id);
+-- A restricted event is visible only to admins, its creator and the people listed in rfx_access.
+alter table rfx add column if not exists restricted boolean not null default false;
+create table if not exists rfx_access (
+  rfx_id     text not null references rfx(id) on delete cascade,
+  user_id    text not null references users(id) on delete cascade,
+  added_by   text references users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  primary key (rfx_id, user_id)
+);
+alter table events add column if not exists workspace_id text references workspaces(id) on delete cascade;
+create index if not exists events_workspace_idx on events(workspace_id, id);
+
+-- Backfill, safe to re-run: every person without a workspace gets their own, as admin;
+-- events and audit entries follow their owner's workspace.
+insert into workspaces (id, name)
+  select 'ws_' || u.id, coalesce(nullif(trim(u.company), ''), split_part(u.name, ' ', 1) || '''s workspace')
+  from users u
+  where u.workspace_id is null and not exists (select 1 from workspace_members m where m.user_id = u.id)
+  on conflict (id) do nothing;
+insert into workspace_members (workspace_id, user_id, role)
+  select 'ws_' || u.id, u.id, 'admin' from users u
+  where u.workspace_id is null and exists (select 1 from workspaces w where w.id = 'ws_' || u.id)
+  on conflict do nothing;
+update users u set workspace_id = (select m.workspace_id from workspace_members m where m.user_id = u.id order by m.created_at limit 1)
+  where u.workspace_id is null;
+update rfx r set workspace_id = u.workspace_id from users u where r.user_id = u.id and r.workspace_id is null;
+update events e set workspace_id = r.workspace_id from rfx r where e.rfx_id = r.id and e.workspace_id is null;
+update events e set workspace_id = u.workspace_id from users u where e.rfx_id is null and e.user_id = u.id and e.workspace_id is null;
+
+-- Workspace settings an admin controls: automatic reminders, approval steps by value.
+--   { "reminders": { "enabled": bool, "everyDays": int },
+--     "approvalSteps": [ { "aboveInr": number, "name": text, "email": text } ] }
+alter table workspaces add column if not exists settings jsonb not null default '{}'::jsonb;
+
+-- Archive instead of delete: an archived event drops out of lists but keeps its record.
+alter table rfx add column if not exists archived_at timestamptz;
+
+-- An event created without a workspace (by an older build of the app) takes its creator's.
+create or replace function rfx_workspace() returns trigger language plpgsql as $fn$
+begin
+  if new.workspace_id is null then new.workspace_id := (select workspace_id from users where id = new.user_id); end if;
+  return new;
+end $fn$;
+drop trigger if exists rfx_workspace_trg on rfx;
+create trigger rfx_workspace_trg before insert on rfx for each row execute function rfx_workspace();
+alter table rfx add column if not exists archived_by text references users(id) on delete set null;
+
+-- Notifications are read from the audit trail; this marks how far a person has read.
+alter table users add column if not exists notifications_seen_at timestamptz;
+
+-- A conversation on one price: "Vector confirmed this on the phone".
+create table if not exists cell_comments (
+  id          text primary key,
+  rfx_id      text not null references rfx(id) on delete cascade,
+  supplier_id text not null references suppliers(id) on delete cascade,
+  line_no     integer not null,
+  text        text not null,
+  user_id     text references users(id) on delete set null,
+  actor       text not null default 'user',
+  created_at  timestamptz not null default now()
+);
+create index if not exists cell_comments_idx on cell_comments(rfx_id, supplier_id, line_no);
+
+-- Extra approval steps when an award is over a value threshold. Step 0 is the
+-- event's own approver on awards.share_token; these follow it in order.
+create table if not exists award_steps (
+  id          text primary key,
+  award_id    text not null references awards(id) on delete cascade,
+  step        integer not null,
+  name        text not null,
+  email       text,
+  above_inr   numeric,
+  token       text not null unique,
+  -- waiting | sent | approved | rejected | changes_requested
+  status      text not null default 'waiting',
+  decided_by  text,
+  decided_at  timestamptz,
+  note        text,
+  unique (award_id, step)
+);
+
+-- Automatic follow-up reminders already sent, so none is sent twice.
+alter table chases add column if not exists reminders_sent integer not null default 0;
+alter table chases add column if not exists last_reminded_at timestamptz;
+
+-- Tamper evidence for the audit trail. Each entry stores the hash of the
+-- entry before it in its workspace and a hash over its own content, so a
+-- changed or deleted entry breaks the chain (see lib/audit-chain.ts).
+alter table events add column if not exists prev_hash text;
+alter table events add column if not exists hash text;
+
+create or replace function events_hash(prev text, e events) returns text language sql immutable as $fn$
+  select encode(sha256(convert_to(
+    coalesce(prev, '') || '|' || e.id::text || '|' || coalesce(e.workspace_id, '') || '|' || coalesce(e.rfx_id, '') || '|' ||
+    coalesce(e.user_id, '') || '|' || e.actor || '|' || e.kind || '|' || coalesce(e.tool, '') || '|' ||
+    coalesce(e.user_request, '') || '|' || e.summary || '|' || e.detail::text || '|' ||
+    to_char(e.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US'), 'UTF8')), 'hex')
+$fn$;
+
+create or replace function events_chain() returns trigger language plpgsql as $fn$
+declare prev text;
+begin
+  if new.workspace_id is null then
+    new.workspace_id := coalesce((select workspace_id from rfx where id = new.rfx_id), (select workspace_id from users where id = new.user_id));
+  end if;
+  perform pg_advisory_xact_lock(hashtext('events:' || coalesce(new.workspace_id, '')));
+  select hash into prev from events where workspace_id is not distinct from new.workspace_id and hash is not null order by id desc limit 1;
+  new.prev_hash := prev;
+  new.hash := events_hash(prev, new);
+  return new;
+end $fn$;
+drop trigger if exists events_chain_trg on events;
+create trigger events_chain_trg before insert on events for each row execute function events_chain();
+
+-- Entries are never edited. Deleting is allowed only through cascades (an
+-- account removed by the operator), and shows up as a break in the chain.
+create or replace function events_no_update() returns trigger language plpgsql as $fn$
+begin
+  -- the one-off sealing of older entries, and filling in a missing workspace, are the only updates allowed
+  if old.hash is null or old.workspace_id is null then return new; end if;
+  raise exception 'Audit entries cannot be changed';
+end $fn$;
+drop trigger if exists events_no_update_trg on events;
+create trigger events_no_update_trg before update on events for each row execute function events_no_update();
+
+-- Seal entries written before the chain existed, oldest first, once.
+do $do$
+declare r events; prev text; ws text := '__none__';
+begin
+  for r in select * from events where hash is null order by workspace_id nulls first, id loop
+    if r.workspace_id is distinct from ws then
+      ws := r.workspace_id;
+      select hash into prev from events where workspace_id is not distinct from r.workspace_id and hash is not null order by id desc limit 1;
+    end if;
+    update events set prev_hash = prev, hash = events_hash(prev, r) where id = r.id;
+    prev := events_hash(prev, r);
+  end loop;
+end $do$;
+
+-- Stars: a person's favourite events, shown under Pinned in the sidebar.
+create table if not exists rfx_stars (
+  user_id    text not null references users(id) on delete cascade,
+  rfx_id     text not null references rfx(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, rfx_id)
+);
+
+-- To-dos assigned to a teammate or snoozed until a date. A to-do is derived
+-- from the event's state; this only stores what a person decided about it.
+create table if not exists todo_state (
+  workspace_id  text not null references workspaces(id) on delete cascade,
+  todo_key      text not null,
+  rfx_id        text references rfx(id) on delete cascade,
+  assigned_to   text references users(id) on delete set null,
+  snoozed_until timestamptz,
+  updated_by    text references users(id) on delete set null,
+  updated_at    timestamptz not null default now(),
+  primary key (workspace_id, todo_key)
+);
+
+-- A second connector link per person that can only read.
+alter table users add column if not exists mcp_token_ro text unique;
+
+-- Where to post workspace events besides email: Slack, Microsoft Teams or any webhook.
+create table if not exists notification_channels (
+  id          text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  kind        text not null,
+  name        text not null,
+  url_enc     text not null,
+  events      text[] not null default '{}',
+  created_by  text references users(id) on delete set null,
+  last_ok_at  timestamptz,
+  last_error  text,
+  created_at  timestamptz not null default now()
+);
+
+-- Who drafted an award, so nobody approves their own.
+alter table awards add column if not exists drafted_by_user text references users(id) on delete set null;
+-- Which events each person wants an email about (Settings, Notifications).
+alter table users add column if not exists notify jsonb not null default '{}'::jsonb;

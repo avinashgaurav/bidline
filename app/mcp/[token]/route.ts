@@ -3,6 +3,7 @@ import { userByMcpToken } from "@/lib/auth";
 import { q } from "@/lib/db";
 import { appUrlFrom } from "@/lib/app-url";
 import { buildServer } from "@/lib/mcp/server";
+import { disabledTools } from "@/lib/team";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,7 +31,7 @@ async function handle(req: Request, { params }: { params: Promise<{ token: strin
   if (!user.last_mcp_at || Date.now() - new Date(user.last_mcp_at).getTime() > 60_000) {
     await q("update users set last_mcp_at = now() where id = $1", [user.id]);
   }
-  const server = buildServer(user, appUrlFrom(req));
+  const server = buildServer(user, appUrlFrom(req), { disabled: await disabledTools(user.workspace_id) });
   const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   await server.connect(transport);
   return transport.handleRequest(req);

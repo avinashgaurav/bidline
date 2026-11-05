@@ -9,5 +9,4 @@ export const EVENT_STEPS = [
   { tab: "chase", label: "Follow-ups", help: "What each supplier still owes you, the money affected, and a drafted email." },
   { tab: "award", label: "Award", help: "Award options priced like for like, the award note and the approval link." },
   { tab: "assumptions", label: "Rates & units", help: "Exchange rates, unit conversions and prior-order rates the comparison relies on." },
-  { tab: "activity", label: "Activity", help: "Every change by Claude, you or the approver, in order." },
 ] as const;

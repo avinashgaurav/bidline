@@ -1,91 +1,15 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, Check, Copy, ExternalLink } from "lucide-react";
 import { Mark } from "@/components/brand";
 import { ClaudeMark } from "@/components/claude-mark";
 
-const DISMISSED = "bidline:onboarding-dismissed";
 const CLAUDE_GUIDE = "https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp";
 
-// Per-browser memory of "Skip for now", read without a hydration mismatch.
-const listeners = new Set<() => void>();
-const readDismissed = () => {
-  try {
-    return localStorage.getItem(DISMISSED) === "1";
-  } catch {
-    return false;
-  }
-};
-const setDismissed = (v: boolean) => {
-  try {
-    if (v) localStorage.setItem(DISMISSED, "1");
-    else localStorage.removeItem(DISMISSED);
-  } catch {
-    // private window: the popup simply shows again next time
-  }
-  listeners.forEach((l) => l());
-};
-const subscribe = (l: () => void) => {
-  listeners.add(l);
-  return () => listeners.delete(l);
-};
-
-type Stage = "connect" | null;
-
-/**
- * First run: connect Claude. The dashboard stays visible, blurred, behind the
- * card, so the destination is never hidden. Starting an event is the page's own
- * question once this closes.
- */
-export function Onboarding({ connected, connectorUrl }: { connected: boolean; connectorUrl: string }) {
-  const dismissed = useSyncExternalStore(subscribe, readDismissed, () => true);
-  const [opened, setOpened] = useState<Stage>(null);
-  const [isConnected, setIsConnected] = useState(connected);
-  const auto: Stage = dismissed || isConnected ? null : "connect";
-  const stage = opened ?? auto;
-
-  const close = () => {
-    setOpened(null);
-    setDismissed(true);
-  };
-
-  return (
-    <>
-      {!isConnected && !stage ? (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl bg-night px-4 py-2.5 text-sm text-on-dark">
-          <ClaudeMark className="size-5" />
-          <span className="flex-1">Claude is not connected yet. Bidline needs your Claude to read supplier quotes.</span>
-          <button onClick={() => setOpened("connect")} className="rounded-full bg-white px-4 py-1.5 text-night hover:bg-fog">Connect Claude</button>
-        </div>
-      ) : null}
-      {stage ? (
-        <div role="dialog" aria-modal="true" aria-labelledby="onboarding-title"
-          className="fixed inset-0 z-50 overflow-y-auto bg-night/30 backdrop-blur-[10px] backdrop-saturate-150 motion-safe:animate-in motion-safe:fade-in-0"
-          onKeyDown={(e) => e.key === "Escape" && close()}>
-          <div className="flex min-h-full items-center justify-center p-4 sm:p-8">
-          <div className="w-full max-w-[560px] rounded-2xl bg-card p-7 shadow-[0_1px_2px_rgba(23,23,33,0.06),0_28px_70px_-16px_rgba(23,23,33,0.35)] sm:p-9 motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:fade-in-0">
-            <ConnectStep
-              url={connectorUrl}
-              connected={isConnected}
-              onConnected={() => {
-                // Stay on this card to show "Claude MCP connected" until Continue.
-                setOpened("connect");
-                setIsConnected(true);
-              }}
-              onSkip={close}
-              onContinue={close}
-            />
-          </div>
-          </div>
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-function ConnectStep({ url, connected, onConnected, onSkip, onContinue }: {
+/** Step two of the first run: connect Claude. Watches for the first call and shows it landing. */
+export function ConnectStep({ url, connected, onConnected, onSkip, onContinue }: {
   url: string; connected: boolean; onConnected: () => void; onSkip: () => void; onContinue: () => void;
 }) {
   const router = useRouter();
@@ -138,11 +62,12 @@ function ConnectStep({ url, connected, onConnected, onSkip, onContinue }: {
       </div>
 
       <div className="text-center">
-        <h2 id="onboarding-title" className="text-[28px] leading-tight">{connected ? "Claude is connected" : "Connect Claude to Bidline"}</h2>
+        <p className="text-[12px] font-medium tracking-[0.06em] text-ink-secondary uppercase">Step 2 of 2</p>
+        <h2 id="onboarding-title" className="mt-1.5 text-[26px] leading-tight">{connected ? "Claude is connected" : "Connect your Claude"}</h2>
         <p className="mx-auto mt-2 max-w-[44ch] text-[16px] text-ink-secondary">
           {connected
             ? "Your Claude can now read supplier quotes into Bidline. Every price it reads appears here, ready to check."
-            : "Your Claude reads the supplier quotes. Bidline does the calculations and keeps the record. It takes about a minute."}
+            : "Bidline has no AI of its own. Your Claude reads each supplier file and sends the prices here; Bidline checks them, compares them and keeps the record. Takes about a minute."}
         </p>
       </div>
 
@@ -169,6 +94,19 @@ function ConnectStep({ url, connected, onConnected, onSkip, onContinue }: {
         </ol>
       ) : null}
 
+      {connected ? (
+        <div className="grid gap-2 rounded-xl bg-muted px-4 py-3 text-[13.5px]">
+          <p className="font-medium">What happens now</p>
+          {[
+            "In a Claude chat with Bidline switched on, ask it to read your supplier documents.",
+            "Prices appear in Compare quotes within seconds, each linked to the line it came from.",
+            "Every change Claude or your team makes is written to the audit log, with who and when.",
+          ].map((t, i) => (
+            <p key={t} className="flex gap-2.5 text-ink-secondary"><span className="num grid size-5 shrink-0 place-items-center rounded-full bg-card text-[11px] text-primary">{i + 1}</span>{t}</p>
+          ))}
+        </div>
+      ) : null}
+
       <div className={`flex items-center gap-3 rounded-xl px-4 py-3 text-sm ${connected ? "bg-success/10 text-success" : "bg-muted text-ink-secondary"}`} aria-live="polite">
         {connected ? (
           <>
@@ -186,10 +124,10 @@ function ConnectStep({ url, connected, onConnected, onSkip, onContinue }: {
       </div>
 
       <div className="flex items-center justify-between gap-3">
-        {connected ? <span /> : <button onClick={onSkip} className="text-sm text-ink-secondary hover:text-foreground">Skip for now</button>}
+        {connected ? <span /> : <button onClick={onSkip} className="text-sm text-ink-secondary hover:text-foreground">Skip, I&apos;ll connect later</button>}
         <button onClick={onContinue} disabled={!connected}
           className="inline-flex h-10 items-center gap-1.5 rounded-full bg-primary px-5 text-[16px] text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-ink-secondary">
-          Continue <ArrowRight className="size-4" />
+          Go to the dashboard <ArrowRight className="size-4" />
         </button>
       </div>
     </div>

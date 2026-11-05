@@ -29,7 +29,7 @@ export function StartChoice({ heading = "How do you want to start?" }: { heading
           {own ? back("ask") : null}
           <h2 className={`${own ? "mt-3 " : ""}text-[24px] leading-tight`}>{own ? "How do you want to set it up?" : heading}</h2>
           <p className="mt-1 text-[15px] text-ink-secondary">
-            {own ? "Either way, you upload the supplier quotes next and Claude reads them." : "Pick one. You can add more sourcing events any time."}
+            {own ? "Either way, you upload the supplier quotes next and your Claude reads them." : "Pick one to begin. You can add more sourcing events, or load the demo, any time."}
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -43,10 +43,10 @@ export function StartChoice({ heading = "How do you want to start?" }: { heading
           ) : (
             <>
               <Choice icon={<FileSpreadsheet className="size-5 text-primary" />} title="Use demo data" badge="2 minutes"
-                text="A ready-made IT hardware RFQ: 30 line items, 5 suppliers and their quotes in Excel, PDF, Word, email and a phone photo. All fictional."
+                text="Explore with a ready-made purchase: 30 IT hardware items, 5 suppliers and 12 quote files in Excel, PDF, Word, email and a phone photo. All fictional."
                 onClick={() => setStage("demo")} />
               <Choice icon={<FolderOpen className="size-5 text-primary" />} title="Use my own files"
-                text="Set up a real purchase and upload the quotes your suppliers sent you." onClick={() => setStage("own")} />
+                text="Set up a real purchase and upload the quotes your suppliers sent you. Only people in your workspace can see them." onClick={() => setStage("own")} />
             </>
           )}
         </div>
