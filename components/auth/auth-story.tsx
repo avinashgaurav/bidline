@@ -14,10 +14,10 @@ export function AuthStory() {
     <div className="mx-auto grid w-full max-w-[540px] gap-6 xl:gap-7">
       <div className="grid gap-2.5">
         <h2 className="text-[28px] leading-[1.12] text-balance text-on-dark sm:text-[32px] xl:text-[36px]">
-          Every supplier quote, compared like for like.
+          Pick the right supplier, and prove it.
         </h2>
         <p className="max-w-[44ch] text-[15px] leading-relaxed text-fog sm:text-[16px]" style={{ fontWeight: 360 }}>
-          Your Claude reads the quotes. Bidline lines up every price and gets the award approved.
+          Every price traced to the supplier&apos;s own words, every change logged, approval in one click.
         </p>
       </div>
 
