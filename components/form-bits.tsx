@@ -31,7 +31,7 @@ export const areaClass =
 
 export function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
-    <label className="grid gap-1.5 text-sm">
+    <label className="grid content-start gap-1.5 text-sm">
       <span className="text-ink-secondary">{label}</span>
       {children}
       {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
