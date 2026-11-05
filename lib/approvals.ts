@@ -53,14 +53,28 @@ export async function awardForToken(token: string) {
  */
 export async function decideStep(opts: {
   awardId: string; token: string | null; decision: Decision; name: string; note: string | null;
+  /** Set for a decision made signed in to the app. */
+  decider?: { userId: string; email: string | null };
   log: { userId: string; actor: "approver" | "user"; rfxId: string; code: string };
 }): Promise<boolean> {
   const steps = await stepsOf(opts.awardId);
   if (!steps.length) return false;
+  const live = await one<{ status: string }>("select status from awards where id = $1", [opts.awardId]);
+  if (live?.status !== "sent") throw new BadInput(`This award is ${String(live?.status ?? "gone").replace(/_/g, " ")}, so it no longer takes a decision.`);
   const step = opts.token ? steps.find((s) => s.token === opts.token) : steps.find((s) => s.status === "sent");
   if (!step) throw new NotFound("This approval link is not valid.");
   if (step.status === "waiting") throw new BadInput(`This award is still with ${steps.find((s) => s.status === "sent")?.name ?? "an earlier approver"}. Your link opens for a decision once they approve.`);
   if (step.status !== "sent") throw new BadInput(`This step was already ${step.status.replace(/_/g, " ")}${step.decided_by ? ` by ${step.decided_by}` : ""}.`);
+  if (opts.decider) {
+    // Each step needs a different person. The extra steps an admin set up, when they name an
+    // email, are that person's to decide; the first step is open to any approver in the app.
+    if (step.step > 0 && step.email && opts.decider.email && step.email.toLowerCase() !== opts.decider.email.toLowerCase()) {
+      throw new BadInput(`This step is for ${step.name} (${step.email}). They decide it, signed in or on their link.`);
+    }
+    if (steps.some((x) => x.step < step.step && x.decided_by === opts.name)) {
+      throw new BadInput("You already approved an earlier step of this award. A different person must decide this one.");
+    }
+  }
   const done = await q("update award_steps set status = $2, decided_by = $3, decided_at = now(), note = $4 where id = $1 and status = 'sent' returning id",
     [step.id, opts.decision, opts.name.slice(0, 120), opts.note?.slice(0, 2000) ?? null]);
   if (!done.length) throw new BadInput("This step was decided a moment ago.");
@@ -75,9 +89,10 @@ export async function decideStep(opts: {
     });
     return true;
   }
-  // Final approval, or a rejection that ends the round.
-  await q("update awards set status = $2, decided_by = $3, decided_at = now(), decision_note = $4 where id = $1 and status = 'sent'",
+  // Final approval, or a rejection that ends the round. Only an award still waiting can end here.
+  const ended = await q("update awards set status = $2, decided_by = $3, decided_at = now(), decision_note = $4 where id = $1 and status = 'sent' returning id",
     [opts.awardId, opts.decision, opts.name.slice(0, 120), opts.note?.slice(0, 2000) ?? null]);
+  if (!ended.length) throw new BadInput("This award was decided or withdrawn a moment ago.");
   if (opts.decision !== "approved") await q("update award_steps set status = 'cancelled' where award_id = $1 and status = 'waiting'", [opts.awardId]);
   if (opts.decision === "approved") await q("update rfx set status = 'awarded' where id = $1 and status <> 'closed'", [opts.log.rfxId]);
   const drafter = await one<{ drafted_by_user: string | null }>("select drafted_by_user from awards where id = $1", [opts.awardId]);

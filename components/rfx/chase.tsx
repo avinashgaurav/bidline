@@ -41,6 +41,7 @@ export async function ChaseTab({ cmp, canEdit }: { cmp: Comparison; canEdit: boo
       atRiskInr: g.totalAtRiskInr,
       resolved: g.resolvedWithoutAsking.map((r) => `${r.what} (lines ${r.lineNos.join(", ")})`),
       state: overdue ? "overdue" : open.length ? "waiting" : g.items.length ? "missing" : "clear",
+      unreadFiles: cmp.documents.filter((d) => d.supplier_id === s.id && d.status === "unread").length,
       draft, history,
     };
   });

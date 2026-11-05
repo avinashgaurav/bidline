@@ -2,11 +2,12 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { signExport, type User } from "../auth";
 import { toolAllowed, type ToolInfo } from "./catalog";
+import { can } from "../roles";
 import { getEmailAccount } from "../mail";
 import { q } from "../db";
 import { logEvent, listEvents, transcriptMarkdown } from "../events";
 import {
-  BadInput, NotFound, getLineNotes, getLines, getQuestions, listRfxs, qualityGate, resolveRfx, resolveSupplier,
+  BadInput, ME_CTE, NotFound, VISIBLE, getLineNotes, getLines, getQuestions, listRfxs, qualityGate, resolveRfx, resolveSupplier,
 } from "../rfx";
 import { documentBytes, getDocument, listDocuments } from "../files";
 import { documentContent, type McpContent } from "../extract/for-claude";
@@ -91,6 +92,8 @@ export function buildServer(user: User, appUrl: string, opts: { disabled?: strin
   }
 
   const ro = { readOnlyHint: true, openWorldHint: false } as const;
+  // The approval link decides an award without a login, so only people who send it (buyers) or decide (approvers) see it.
+  const mayShareLink = can(user.role, "edit") || can(user.role, "approve");
   const rw = { readOnlyHint: false, destructiveHint: false, openWorldHint: false } as const;
 
   // -------------------------------------------------------------------------
@@ -142,8 +145,8 @@ export function buildServer(user: User, appUrl: string, opts: { disabled?: strin
     const rfxs = (await listRfxs(user.id)).filter((r) => !["awarded", "closed"].includes(r.status)).slice(0, 15);
     if (!rfxs.length) return "Nothing open. Every sourcing event is awarded or closed.";
     const overdue = await q<{ rfx_id: string; n: number }>(
-      `select c.rfx_id, count(*)::int as n from chases c join rfx r on r.id = c.rfx_id
-        where r.user_id = $1 and c.answered_at is null and c.closed_reason is null and c.due_at < now() group by c.rfx_id`, [user.id]);
+      `with ${ME_CTE} select c.rfx_id, count(*)::int as n from chases c join rfx r on r.id = c.rfx_id, me
+        where ${VISIBLE} and c.answered_at is null and c.closed_reason is null and c.due_at < now() group by c.rfx_id`, [user.id]);
     const cmps = await Promise.all(rfxs.map((r) => loadComparison(r)));
     const out: string[] = [];
     for (const [i, r] of rfxs.entries()) {
@@ -1020,7 +1023,7 @@ export function buildServer(user: User, appUrl: string, opts: { disabled?: strin
       `select scenario_key, status, decided_by, decided_at::text, decision_note, share_token, created_at::text, snapshot from awards where rfx_id = $1 order by created_at desc`, [rfx.id],
     );
     if (!rows.length) return `No award drafted on ${rfx.code} yet.`;
-    return rows.map((a) => `- ${a.created_at.slice(0, 16)} ${a.snapshot.label}, ${inr(a.snapshot.totalInr)}: ${a.status.replace(/_/g, " ")}${a.decided_by ? ` by ${a.decided_by}` : ""}${a.decision_note ? ` ("${a.decision_note}")` : ""}. ${appUrl}/share/${a.share_token}`).join("\n");
+    return rows.map((a) => `- ${a.created_at.slice(0, 16)} ${a.snapshot.label}, ${inr(a.snapshot.totalInr)}: ${a.status.replace(/_/g, " ")}${a.decided_by ? ` by ${a.decided_by}` : ""}${a.decision_note ? ` ("${a.decision_note}")` : ""}.${a.status === "sent" && mayShareLink ? ` Approval link: ${appUrl}/share/${a.share_token}` : ""}`).join("\n");
   }, { query: "Checked the award status.", rfx: args.rfx ?? "" }));
 
   // -------------------------------------------------------------------------
@@ -1100,8 +1103,7 @@ export function buildServer(user: User, appUrl: string, opts: { disabled?: strin
     annotations: ro,
   }, async (args) => run("spend_summary", args, async () => {
     const sp = await spend(user.id);
-    const awarded = sp.byEvent.reduce((a, e) => a + (e.awarded ?? 0), 0);
-    const baseline = sp.byEvent.reduce((a, e) => a + (e.awarded !== null ? e.baseline ?? 0 : 0), 0);
+    const { awarded, baseline } = sp.totals;
     return [
       `Awarded (approved): ${inr(awarded)}. Budget for those lines: ${baseline ? inr(baseline) : "not set"}. Saved against budget: ${baseline ? inr(baseline - awarded) : "n/a"}.`,
       "", "BY CATEGORY", ...sp.byCategory.map((c) => `- ${c.category}: ${inr(c.awarded)} awarded, budget ${inr(c.baseline)}, ${c.lines} lines`),

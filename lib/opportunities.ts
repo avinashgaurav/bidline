@@ -1,6 +1,6 @@
 import { loadComparison } from "./comparison";
 import { findOutliers } from "./calc/outliers";
-import { resolveRfx, type RfxListRow } from "./rfx";
+import type { RfxListRow } from "./rfx";
 
 /**
  * Ways to save, across open events, each with a rupee value, and how much of
@@ -11,7 +11,8 @@ export interface Opportunity { rfxId: string; code: string; title: string; kind:
 
 export async function savingsOpportunities(userId: string, events: RfxListRow[]) {
   const open = events.filter((e) => !e.archived_at && ["issued", "evaluating"].includes(e.status) && e.responded > 0 && e.award_status !== "approved").slice(0, 6);
-  const cmps = await Promise.all(open.map(async (e) => loadComparison(await resolveRfx(userId, e.id))));
+  // The rows were loaded with the person's access already applied, so they can be used as they are.
+  const cmps = await Promise.all(open.map((e) => loadComparison(e)));
   const out: Opportunity[] = [];
   let identifiedOpen = 0;
   for (const cmp of cmps) {

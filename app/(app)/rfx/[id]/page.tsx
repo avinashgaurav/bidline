@@ -75,11 +75,13 @@ export default async function RfxPage({ params, searchParams }: {
   const unread = cmp.documents.filter((d) => d.status === "unread").length;
   const gate = qualityGate(cmp.lines);
   const c = cmp.compliance;
-  const needsPerson = cmp.trust.needsHuman + cmp.unmapped.filter((u) => !u.resolution).length;
+  // Same count as the Overview chart: prices only a person can settle. Unmatched items are listed separately.
+  const needsPerson = cmp.trust.needsHuman;
+  const unmatched = cmp.unmapped.filter((u) => !u.resolution).length;
   const anyAssessed = cmp.suppliers.some((s) => cmp.supplierInfo[s.code].verdict.assessed);
   const showQualified = cmp.questions.length > 0 && anyAssessed;
 
-  const openItems = cmp.suppliers.reduce((a, s) => a + (cmp.supplierInfo[s.code]?.gaps?.gapCount ?? 0), 0);
+  const openItems = cmp.suppliers.reduce((a, s) => a + (cmp.supplierInfo[s.code]?.gaps?.items.length ?? 0), 0);
   const latestAward = cmp.awards[0];
   const approver = (rfx.approver as { name?: string }).name;
   const counts: Record<string, { n?: number; warn?: boolean; label?: string; tone?: string }> = {
@@ -159,17 +161,19 @@ export default async function RfxPage({ params, searchParams }: {
           <p className="flex items-center gap-2 rounded-xl bg-lavender px-4 py-2.5 text-[13.5px]"><Eye className="size-4 text-primary" /> You can view this event{can(rfx.my_role, "approve") ? ", add notes and decide its award" : ""}. Editing needs the Buyer or Admin role.</p>
         ) : null}
 
+        {/* The figures and the next step lead on Overview; other tabs start with their own content. */}
+        {tab === "overview" ? (<>
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border ring-1 ring-border @2xl:grid-cols-3 @5xl:grid-cols-5">
           <Kpi label="Lowest total, all suppliers" help="The cheapest price on every line, whichever supplier offered it. Ignores qualification. Prices that need review are left out."
-            value={cmp.hasAnyReading ? inrShort(c.naive.totalInr) : "Not yet"} sub={cmp.hasAnyReading ? `${c.naive.linesAwarded} of ${cmp.lines.length} lines priced` : "No quotes read yet"} />
+            value={cmp.hasAnyReading ? inrShort(c.naive.totalInr) : "None yet"} sub={cmp.hasAnyReading ? `${c.naive.linesAwarded} of ${cmp.lines.length} lines priced` : "No quotes read yet"} />
           <Kpi label="Lowest total, qualified only" help="The same, using only suppliers who pass the questionnaire (certificates, warranty, delivery). This is the basis for a defensible award."
-            value={!cmp.questions.length ? "No questionnaire" : showQualified ? inrShort(c.compliant.totalInr) : "Pending"}
-            sub={!cmp.questions.length ? "Add questions to qualify suppliers" : showQualified ? `${c.compliant.linesAwarded} of ${cmp.lines.length} lines · ${c.qualifiedVendors.length} qualified` : "No questionnaire answers read yet"} />
-          <Kpi label="Cost of qualifying" help="How much more the qualified total costs than the lowest total. What you pay for choosing compliant suppliers."
-            value={showQualified && c.naive.totalInr && c.compliant.linesAwarded ? inrShort(c.deltaInr) : "n/a"}
+            value={!cmp.questions.length ? "No questions" : showQualified ? inrShort(c.compliant.totalInr) : "Waiting"}
+            sub={!cmp.questions.length ? "Add questions to qualify suppliers" : showQualified ? `${c.compliant.linesAwarded} of ${cmp.lines.length} lines · ${c.qualifiedVendors.length} qualified` : "Ask Claude to read the questionnaire answers"} />
+          <Kpi label="Extra cost of qualified suppliers" help="How much more the qualified total costs than the lowest total. What you pay for choosing suppliers who meet your requirements."
+            value={showQualified && c.naive.totalInr && c.compliant.linesAwarded ? inrShort(c.deltaInr) : "Not yet"}
             sub={showQualified && c.likeForLike.warning ? "Covers different lines, see Award" : showQualified ? "Qualified minus lowest" : "Needs questionnaire answers"} />
-          <Kpi label="Needs review" help="Prices Bidline will not count until a person checks them: unreadable, two readings disagree, no source quoted, or not a firm price."
-            value={String(needsPerson)} sub={needsPerson ? "Kept out of all totals" : "Nothing to check"} warn={needsPerson > 0} href={needsPerson ? `/rfx/${rfx.id}?tab=comparison` : undefined} />
+          <Kpi label="Prices to check" help="Prices Bidline will not count until a person checks them: unreadable, two readings disagree, no source quoted, or not a firm price."
+            value={String(needsPerson)} sub={needsPerson ? `Kept out of totals${unmatched ? ` · ${unmatched} unmatched item${unmatched === 1 ? "" : "s"}` : ""}` : unmatched ? `${unmatched} unmatched item${unmatched === 1 ? "" : "s"} to place` : "Nothing to check"} warn={needsPerson > 0} href={needsPerson ? `/rfx/${rfx.id}?tab=comparison` : undefined} />
           <Kpi label="Unread documents" help="Supplier files uploaded but not yet read. Bidline has no AI inside: ask your Claude to read them."
             value={String(unread)} sub={unread ? "Ask Claude to read them" : "All read"} warn={unread > 0} href={unread ? `/rfx/${rfx.id}?tab=documents` : undefined} className="col-span-2 @5xl:col-span-1" />
         </div>
@@ -179,6 +183,7 @@ export default async function RfxPage({ params, searchParams }: {
         ) : null}
 
         {canEdit ? <NextStep rfx={rfx} cmp={cmp} unread={unread} needsPerson={needsPerson} openItems={openItems} gate={gate.length} /> : null}
+        </>) : null}
 
         <EventTabs rfxId={rfx.id} tabs={tabs} active={tab} />
 

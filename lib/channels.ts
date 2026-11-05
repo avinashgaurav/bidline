@@ -36,10 +36,7 @@ function checkUrl(kind: ChannelKind, raw: string): string {
   return u.toString();
 }
 
-const hint = (url: string) => {
-  const u = new URL(url);
-  return `${u.hostname}/…${u.pathname.slice(-6)}`;
-};
+const hint = (url: string) => `${new URL(url).hostname}/…`;
 
 export async function listChannels(workspaceId: string): Promise<Channel[]> {
   const rows = await q<Channel & { url_enc: string }>("select * from notification_channels where workspace_id = $1 order by created_at", [workspaceId]);
@@ -57,6 +54,7 @@ export async function addChannel(userId: string, input: { kind: string; name: st
   const kind = CHANNEL_KINDS.find((k) => k.key === input.kind)?.key;
   if (!kind) throw new BadInput("Pick Slack, Teams or Webhook.");
   const url = checkUrl(kind, input.url);
+  await assertPublic(url);
   const events = input.events.filter((e) => NOTIFY_KINDS.some((k) => k.key === e));
   if (!events.length) throw new BadInput("Pick at least one event to send.");
   const ws = await wsOf(userId);
@@ -76,7 +74,19 @@ export async function removeChannel(userId: string, id: string) {
   await logEvent({ userId, workspaceId: ws, actor: "user", kind: "settings_changed", summary: `Removed the ${gone[0].kind} channel "${gone[0].name}".`, detail: { before: gone[0] } });
 }
 
+const PRIVATE = (ip: string) =>
+  /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/.test(ip) ||
+  ip === "::1" || /^f[cd]/i.test(ip) || /^fe80/i.test(ip) || ip.startsWith("::ffff:127.") || ip === "::";
+
+/** The host must resolve only to public addresses, checked again on every post. */
+async function assertPublic(url: string) {
+  const { lookup } = await import("node:dns/promises");
+  const addrs = await lookup(new URL(url).hostname, { all: true }).catch(() => []);
+  if (!addrs.length || addrs.some((a) => PRIVATE(a.address))) throw new BadInput("That address points to a private network, which is not allowed.");
+}
+
 async function post(kind: string, url: string, event: string, text: string, code: string | null) {
+  await assertPublic(url);
   const body = kind === "webhook" ? { event, text, eventCode: code, at: new Date().toISOString() } : { text };
   const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000), redirect: "error" });
   if (!res.ok) throw new Error(`The channel answered ${res.status}.`);
@@ -102,14 +112,16 @@ export async function announce(rfxId: string, kind: NotifyKind, text: string) {
     const chans = await q<{ id: string; kind: string; url_enc: string; code: string }>(
       `select c.id, c.kind, c.url_enc, r.code from notification_channels c join rfx r on r.workspace_id = c.workspace_id
         where r.id = $1 and $2 = any(c.events) and not r.restricted`, [rfxId, kind]);
-    for (const c of chans) {
+    // Plain text only, bounded: names typed on the public approval page must not ping a channel.
+    const safe = text.replace(/[<>@]/g, "").slice(0, 500);
+    await Promise.all(chans.map(async (c) => {
       try {
-        await post(c.kind, decrypt(c.url_enc), kind, text, c.code);
+        await post(c.kind, decrypt(c.url_enc), kind, safe, c.code);
         await q("update notification_channels set last_ok_at = now(), last_error = null where id = $1", [c.id]);
       } catch (e) {
         await q("update notification_channels set last_error = $2 where id = $1", [c.id, (e as Error).message.slice(0, 300)]);
       }
-    }
+    }));
   } catch (e) {
     console.error("[announce]", (e as Error).message);
   }

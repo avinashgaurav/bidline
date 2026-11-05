@@ -114,14 +114,14 @@ export function entityOf(kind: string, detail: Record<string, unknown> | null | 
     const n = pick("email", "member");
     if (n) return { type: "Person", name: n };
   }
-  if (group === "access" && !rfxCode) return { type: "Workspace", name: "Workspace" };
-  return { type: ENTITY_TYPE[group] ?? "Sourcing event", name: rfxCode ?? "Workspace" };
+  if (group === "access" && !rfxCode) return { type: "Workspace", name: "Workspace settings" };
+  return rfxCode ? { type: "Event", name: rfxCode } : { type: ENTITY_TYPE[group] ?? "Workspace", name: "Workspace" };
 }
 
 /** Who did it, in words. */
 export function actorOf(actor: string, personName: string | null | undefined, detail?: Record<string, unknown> | null): { name: string; via: string } {
   const person = personName ?? "Someone";
-  if (actor === "claude") return { name: "Claude", via: `for ${person}, over MCP` };
+  if (actor === "claude") return { name: "Claude", via: `for ${person}` };
   if (actor === "user") return { name: person, via: "in the app" };
   if (actor === "approver") return { name: String(detail?.name ?? "Approver"), via: "on the approval link" };
   return { name: "Bidline", via: "automatic" };

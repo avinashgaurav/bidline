@@ -1,4 +1,5 @@
-import { newId, one, q } from "./db";
+import { randomBytes } from "node:crypto";
+import { one, q } from "./db";
 import { logEvent } from "./events";
 import { normaliseEmail } from "./auth";
 import { BadInput, NotFound, resolveRfx } from "./rfx";
@@ -40,27 +41,28 @@ export async function listMembers(userId: string): Promise<{ members: Member[]; 
   return { members, invites };
 }
 
-/** Add someone. With an account they join now; without one they join when they sign up with that email. */
-export async function inviteMember(userId: string, emailIn: string, role: string): Promise<"added" | "invited"> {
+/**
+ * Invite someone. The invite link carries an unguessable id; opening it is the
+ * proof of the address. People with an account accept it signed in; others
+ * create their account from it.
+ */
+export async function inviteMember(userId: string, emailIn: string, role: string): Promise<{ id: string; existing: boolean }> {
   await requireWorkspacePerm(userId, "team");
   if (!isRole(role)) throw new BadInput("Pick a role.");
   const email = normaliseEmail(emailIn);
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new BadInput("Enter a valid email address.");
   const { workspace_id } = await ws(userId);
   const existing = await one<{ id: string; name: string }>("select id, name from users where email = $1", [email]);
-  if (existing) {
-    const already = await one("select 1 from workspace_members where workspace_id = $1 and user_id = $2", [workspace_id, existing.id]);
-    if (already) throw new BadInput(`${existing.name} is already in this workspace.`);
-    await q("insert into workspace_members (workspace_id, user_id, role, added_by) values ($1,$2,$3,$4)", [workspace_id, existing.id, role, userId]);
-    await audit(userId, workspace_id, "member_added", `Added ${existing.name} (${email}) as ${roleLabel(role)}.`, { email, role });
-    return "added";
+  if (existing && (await one("select 1 from workspace_members where workspace_id = $1 and user_id = $2", [workspace_id, existing.id]))) {
+    throw new BadInput(`${existing.name} is already in this workspace.`);
   }
+  const id = `inv_${randomBytes(18).toString("base64url")}`;
   await q(
     `insert into workspace_invites (id, workspace_id, email, role, invited_by) values ($1,$2,$3,$4,$5)
-     on conflict (workspace_id, email) do update set role = excluded.role, invited_by = excluded.invited_by, created_at = now(), accepted_at = null`,
-    [newId("inv"), workspace_id, email, role, userId]);
+     on conflict (workspace_id, email) do update set id = excluded.id, role = excluded.role, invited_by = excluded.invited_by, created_at = now(), accepted_at = null`,
+    [id, workspace_id, email, role, userId]);
   await audit(userId, workspace_id, "member_invited", `Invited ${email} as ${roleLabel(role)}.`, { email, role });
-  return "invited";
+  return { id, existing: Boolean(existing) };
 }
 
 export async function cancelInvite(userId: string, inviteId: string) {

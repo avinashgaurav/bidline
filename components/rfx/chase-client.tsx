@@ -15,6 +15,8 @@ export interface SupplierFollowUp {
   atRiskInr: number;
   resolved: string[];
   state: "overdue" | "waiting" | "missing" | "clear";
+  /** Files from this supplier Claude has not read yet: they may already answer what is missing. */
+  unreadFiles: number;
   draft: { subject: string; body: string } | null;
   history: Array<{ id: string; sent_at: string; due_at: string | null; answered_at: string | null; created_by: string; message: string; subject: string | null; how: string; items: string[] }>;
 }
@@ -79,6 +81,12 @@ export function FollowUpsBoard({ rfxId, suppliers, emailReady, demo, canEdit }: 
             <span className={`inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[12px] ${STATE[s.state].cls}`}>{STATE[s.state].label}</span>
           </header>
 
+          {s.unreadFiles ? (
+            <p className="flex flex-wrap items-center gap-2 rounded-lg bg-[var(--cell-review-bg)] px-3 py-2 text-[13px] ring-1 ring-[var(--cell-review)]/25">
+              <span className="min-w-0 flex-1">{s.unreadFiles} file{s.unreadFiles === 1 ? "" : "s"} from {s.name} {s.unreadFiles === 1 ? "is" : "are"} still waiting for Claude. Read {s.unreadFiles === 1 ? "it" : "them"} first: the answers may already be there.</span>
+              <a href="?tab=documents" className="text-primary hover:underline">Open documents</a>
+            </p>
+          ) : null}
           <div className="@container/d grid gap-4 @5xl:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
             <div className="grid content-start gap-3">
               <div>

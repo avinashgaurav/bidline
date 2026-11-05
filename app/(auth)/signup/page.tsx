@@ -10,7 +10,7 @@ export default async function SignupPage({ searchParams }: { searchParams: Promi
   const params = await searchParams;
   // Team invites link here as /signup?email=...&invited=1. Both only change what is shown.
   const email = typeof params.email === "string" ? params.email.trim().slice(0, 254) : undefined;
-  const invited = params.invited === "1";
+  const invited = params.invited === "1" || typeof params.invite === "string";
   return (
     <>
       <h1 className="text-[28px] leading-tight">Create your Bidline account</h1>
@@ -23,7 +23,7 @@ export default async function SignupPage({ searchParams }: { searchParams: Promi
           <span>You have been invited to a Bidline workspace. Create your account to join.</span>
         </p>
       ) : null}
-      <AuthForm mode="signup" defaultEmail={email || undefined} />
+      <AuthForm mode="signup" defaultEmail={email || undefined} invite={typeof params.invite === "string" ? params.invite.slice(0, 64) : undefined} />
     </>
   );
 }

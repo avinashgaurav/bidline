@@ -41,7 +41,7 @@ export function CommandMenu() {
   const [hits, setHits] = useState<Hit[]>([]);
   const [busy, setBusy] = useState(false);
   const [sel, setSel] = useState(0);
-  const list = useRef<HTMLUListElement>(null);
+  const list = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -113,19 +113,19 @@ export function CommandMenu() {
           <DialogPrimitive.Title className="sr-only">Search Bidline</DialogPrimitive.Title>
           <div className="flex items-center gap-3 border-b border-border px-4">
             {busy ? <Loader2 className="size-4 animate-spin text-ink-secondary" /> : <Search className="size-4 text-ink-secondary" />}
-            <input autoFocus value={text} onChange={(e) => { setText(e.target.value); setSel(0); if (e.target.value.trim().length < 2) setHits([]); }} onKeyDown={onKeyDown}
+            <input autoFocus role="combobox" aria-expanded="true" aria-controls="cmdk-list" aria-activedescendant={results[sel] ? `cmdk-${sel}` : undefined} aria-label="Search Bidline" value={text} onChange={(e) => { setText(e.target.value); setSel(0); if (e.target.value.trim().length < 2) setHits([]); }} onKeyDown={onKeyDown}
               placeholder="Search events, suppliers, documents, line items or pages"
               className="h-13 flex-1 bg-transparent py-4 text-[15px] outline-none placeholder:text-ink-secondary/70" />
             <kbd className="rounded bg-muted px-1.5 text-[11px] text-ink-secondary">Esc</kbd>
           </div>
-          <ul ref={list} className="max-h-[56vh] overflow-y-auto p-2" role="listbox" aria-label="Results">
+          <div ref={list} id="cmdk-list" className="max-h-[56vh] overflow-y-auto p-2" role="listbox" aria-label="Results">
             {results.map((h, i) => {
               const Icon = ICON[h.type] ?? ArrowRight;
               const head = i === 0 || GROUP[results[i - 1].type] !== GROUP[h.type] ? GROUP[h.type] : null;
               return (
-                <li key={`${h.href}-${h.title}-${i}`} data-i={i}>
-                  {head ? <p className="px-2.5 pt-2 pb-1 text-[11px] font-medium text-ink-secondary">{head}</p> : null}
-                  <button role="option" aria-selected={sel === i} onMouseMove={() => setSel(i)} onClick={() => go(h)}
+                <div key={`${h.href}-${h.title}-${i}`} data-i={i} role="presentation">
+                  {head ? <p role="presentation" className="px-2.5 pt-2 pb-1 text-[11.5px] font-medium text-ink-secondary">{head}</p> : null}
+                  <button id={`cmdk-${i}`} role="option" aria-selected={sel === i} tabIndex={-1} onMouseMove={() => setSel(i)} onClick={() => go(h)}
                     className={`flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left ${sel === i ? "bg-secondary" : ""}`}>
                     <span className="grid size-7 shrink-0 place-items-center rounded-md bg-muted text-ink-secondary"><Icon className="size-3.5" /></span>
                     <span className="min-w-0 flex-1">
@@ -134,11 +134,11 @@ export function CommandMenu() {
                     </span>
                     {sel === i ? <CornerDownLeft className="size-3.5 text-ink-secondary" /> : null}
                   </button>
-                </li>
+                </div>
               );
             })}
-            {!results.length && !busy ? <li className="px-3 py-8 text-center text-[14px] text-ink-secondary">Nothing matches &ldquo;{text}&rdquo;. Try a supplier name, an event code or a file name.</li> : null}
-          </ul>
+            {!results.length && !busy ? <p className="px-3 py-8 text-center text-[14px] text-ink-secondary">Nothing matches &ldquo;{text}&rdquo;. Try a supplier name, an event code or a file name.</p> : null}
+          </div>
           <div className="flex items-center gap-4 border-t border-border bg-muted/50 px-4 py-2 text-[11px] text-ink-secondary">
             <span>↑↓ to move</span><span>Enter to open</span><span className="ml-auto">Only what you have access to is shown</span>
           </div>

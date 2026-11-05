@@ -12,7 +12,7 @@ export const STAGE_ORDER = ["draft", "issued", "evaluating", "awarded", "closed"
 /** Views of the event list, used by the sidebar and the All events page. */
 export const EVENT_VIEWS: Array<{ key: string; label: string; help: string }> = [
   { key: "all", label: "All events", help: "Every open sourcing event you can see." },
-  { key: "attention", label: "Needs attention", help: "Unread documents, prices to check, overdue follow-ups or an award awaiting approval." },
+  { key: "attention", label: "Needs attention", help: "Unread documents, unreadable prices, overdue follow-ups or an award awaiting approval." },
   { key: "draft", label: "Draft", help: STAGE.draft.help },
   { key: "issued", label: "Collecting quotes", help: STAGE.issued.help },
   { key: "evaluating", label: "Comparing", help: STAGE.evaluating.help },

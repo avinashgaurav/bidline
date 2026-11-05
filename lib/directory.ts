@@ -21,10 +21,11 @@ export async function supplierDirectory(userId: string): Promise<DirectoryRow[]>
               v.code as rfx_code, v.title as rfx_title, v.status as rfx_status
        from suppliers s join vis v on v.id = s.rfx_id where s.status <> 'removed'
      ),
+     latest as (select distinct on (a.rfx_id) a.* from awards a join vis v on v.id = a.rfx_id where a.status = 'approved' order by a.rfx_id, a.decided_at desc),
      won as (
-       select p->>'supplierCode' as code, a.rfx_id, count(*)::int as lines, sum((p->>'extendedInr')::numeric)::float8 as inr
-       from awards a join vis v on v.id = a.rfx_id cross join jsonb_array_elements(a.snapshot->'picks') p
-       where a.status = 'approved' group by 1, 2
+       select p->>'supplierCode' as code, l.rfx_id, count(*)::int as lines, sum((p->>'extendedInr')::numeric)::float8 as inr
+       from latest l cross join jsonb_array_elements(l.snapshot->'picks') p
+       group by 1, 2
      )
      select s.key,
             (array_agg(s.name order by s.created_at desc))[1] as name,

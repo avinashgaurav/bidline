@@ -70,7 +70,8 @@ export async function loginAction(_: FormState, f: FormData): Promise<FormState>
   await startSession(user.id);
   await logEvent({ userId: user.id, actor: "user", kind: "login", summary: `Signed in as ${user.email}.` });
   revalidatePath("/", "layout");
-  redirect("/");
+  const next = str(f, "next");
+  redirect(/^\/invite\/[A-Za-z0-9_-]{8,64}$/.test(next) ? next : "/");
 }
 
 export async function signupAction(_: FormState, f: FormData): Promise<FormState> {
@@ -82,7 +83,7 @@ export async function signupAction(_: FormState, f: FormData): Promise<FormState
   if (await one("select 1 from users where email = $1", [normaliseEmail(email)])) {
     return { error: "An account with that email already exists. Sign in instead." };
   }
-  const user = await createUser({ email, name, password });
+  const user = await createUser({ email, name, password, invite: str(f, "invite") || null });
   await startSession(user.id);
   await logEvent({ userId: user.id, actor: "user", kind: "signup", summary: `Created account ${user.email}.` });
   revalidatePath("/", "layout");
@@ -418,18 +419,19 @@ export async function switchWorkspaceAction(f: FormData) {
 }
 
 export async function inviteMemberUI(_: FormState, f: FormData): Promise<FormState> {
-  let how = "invited" as "added" | "invited";
+  let inv = { id: "", existing: false };
   const email = str(f, "email");
-  const res = await guarded(async (uid) => { how = await T.inviteMember(uid, email, str(f, "role")); });
+  const res = await guarded(async (uid) => { inv = await T.inviteMember(uid, email, str(f, "role")); });
   if (res.error) return res;
-  return { ok: true, message: how === "added" ? `${email} already had an account and has been added.` : `Invite saved. Ask ${email} to create an account at ${await signupLink(email)}` };
+  const link = await inviteLink(inv.id, email, inv.existing);
+  return { ok: true, message: `Invite saved. Send ${email} this link: ${link}` };
 }
 
-async function signupLink(email: string) {
+async function inviteLink(id: string, email: string, existing: boolean) {
   const h = await headers();
   const host = h.get("x-forwarded-host") ?? h.get("host") ?? "";
   const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  return `${proto}://${host}/signup?invited=1&email=${encodeURIComponent(email)}`;
+  return existing ? `${proto}://${host}/invite/${id}` : `${proto}://${host}/signup?invite=${id}&email=${encodeURIComponent(email)}`;
 }
 
 export async function changeRoleUI(memberId: string, _: FormState, f: FormData): Promise<FormState> {

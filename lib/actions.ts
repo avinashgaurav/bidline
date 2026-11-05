@@ -18,6 +18,7 @@ import { can, deniedMessage, type Perm } from "./roles";
 import { awardForToken, createSteps, decideStep } from "./approvals";
 import { getSettings, overLimit } from "./workspace";
 import { approversOf, notify } from "./notify";
+import { expireStaleAwards } from "./expiry";
 import { announce } from "./channels";
 
 /** Who is acting, and on whose behalf. Every action is logged with this. */
@@ -85,6 +86,8 @@ export async function updateRfxAction(ctx: ActionCtx, rfxRef: string | null | un
   const rfx = await rfxFor(ctx, rfxRef);
   const allowed = ["draft", "issued", "evaluating", "awarded", "closed"];
   if (patch.status && !allowed.includes(patch.status)) throw new BadInput(`Status must be one of ${allowed.join(", ")}.`);
+  // "Awarded" comes only from an approved award, never from an edit.
+  if (patch.status === "awarded" && rfx.status !== "awarded") throw new BadInput("An event becomes awarded when its award is approved. Draft the award and send it for approval.");
   const eventType = patch.eventType?.toUpperCase();
   if (eventType && !["RFQ", "RFP", "RFI", "TENDER"].includes(eventType)) throw new BadInput("Event type must be RFQ, RFP, RFI or TENDER.");
   if (eventType) await q(`update rfx set event_type = $2 where id = $1`, [rfx.id, eventType]);
@@ -847,6 +850,10 @@ export async function createAwardAction(ctx: ActionCtx, input: {
   const note = awardMarkdown(cmp, built, [limitWarning, input.commentary].filter(Boolean).join("\n\n") || null);
   const token = randomBytes(18).toString("base64url");
   const id = newId("awd");
+  // A new draft replaces any award still waiting: its links stop accepting a decision.
+  const replaced = await q<{ id: string }>(
+    `update awards set status = 'withdrawn', decided_at = now(), decision_note = 'Replaced by a newer award draft.' where rfx_id = $1 and status = 'sent' returning id`, [rfx.id]);
+  for (const r of replaced) await q("update award_steps set status = 'cancelled' where award_id = $1 and status in ('sent', 'waiting')", [r.id]);
   await q(
     `insert into awards (id, rfx_id, scenario_key, snapshot, note_md, commentary, share_token, status, created_by, drafted_by_user)
      values ($1,$2,$3,$4,$5,$6,$7,'sent',$8,$9)`,
@@ -865,6 +872,7 @@ export async function createAwardAction(ctx: ActionCtx, input: {
 }
 
 export async function decideAwardAction(input: { token: string; decision: "approved" | "rejected" | "changes_requested"; name: string; note?: string | null }) {
+  await expireStaleAwards();
   const award = await awardForToken(input.token);
   if (!award) throw new NotFound("This approval link is not valid.");
   if (!input.name?.trim()) throw new BadInput("Please give your name.");
@@ -900,14 +908,16 @@ export async function decideAwardAction(input: { token: string; decision: "appro
 /** An approver (or admin) deciding inside the app, signed in, instead of on the link. */
 export async function decideAwardInAppAction(ctx: ActionCtx, rfxRef: string, awardId: string, decision: "approved" | "rejected" | "changes_requested", note?: string | null) {
   const rfx = await rfxFor(ctx, rfxRef, "approve");
-  const me = await one<{ name: string }>("select name from users where id = $1", [ctx.userId]);
+  await expireStaleAwards();
+  const me = await one<{ name: string; email: string }>("select name, email from users where id = $1", [ctx.userId]);
   const award = await one<{ drafted_by_user: string | null; status: string }>("select drafted_by_user, status from awards where id = $1 and rfx_id = $2", [awardId, rfx.id]);
   if (!award) throw new NotFound("That award is not on this event.");
   // Separation of duties: the person who drafted an award cannot approve it.
   if (award.drafted_by_user === ctx.userId && decision === "approved") throw new BadInput("You drafted this award, so someone else must approve it. You can still ask for changes or reject it.");
   if (award.status === "expired") throw new BadInput("This approval request expired. Draft the award again to send a fresh one.");
+  if (award.status !== "sent") throw new BadInput(`This award is ${award.status.replace(/_/g, " ")}, so it no longer takes a decision.`);
   if (await decideStep({
-    awardId, token: null, decision, name: me?.name ?? "Approver", note: note ?? null,
+    awardId, token: null, decision, name: me?.name ?? "Approver", note: note ?? null, decider: { userId: ctx.userId, email: me?.email ?? null },
     log: { userId: ctx.userId, actor: "user", rfxId: rfx.id, code: rfx.code },
   })) return;
   const done = await q(
@@ -938,6 +948,11 @@ export async function duplicateRfxAction(ctx: ActionCtx, rfxRef: string | null |
     // rule that follow-ups go to the buyer's own address.
     createdVia: src.created_via === "demo" ? "demo" : ctx.actor === "claude" ? "claude" : "app",
   });
+  // A copy of a restricted event stays restricted to the same people.
+  if (src.restricted) {
+    await q("update rfx set restricted = true where id = $1", [rfx.id]);
+    await q("insert into rfx_access (rfx_id, user_id, added_by) select $1, user_id, $3 from rfx_access where rfx_id = $2 on conflict do nothing", [rfx.id, src.id, ctx.userId]);
+  }
   for (const s of suppliers) {
     const c = (s.contact ?? {}) as { name?: string | null; email?: string | null; phone?: string | null };
     await addSupplier(rfx.id, { name: s.name, code: s.code, city: s.city, gstin: s.gstin, contactName: c.name ?? null, email: c.email ?? null, phone: c.phone ?? null, channel: s.channel, notes: s.notes });
@@ -976,6 +991,7 @@ export async function withdrawAwardAction(ctx: ActionCtx, rfxRef: string | null 
     [award.id, reason.trim().slice(0, 2000)],
   );
   if (!done.length) throw new BadInput(`That award was already ${String(award.status).replace(/_/g, " ")}. Only an award awaiting approval can be withdrawn.`);
+  await q("update award_steps set status = 'cancelled' where award_id = $1 and status in ('sent', 'waiting')", [award.id]);
   await log(ctx, rfx.id, "award_withdrawn", `Withdrew the award on ${rfx.code}. The approval link no longer accepts a decision.`, { awardId: award.id, reason: reason.trim().slice(0, 2000) });
   return { rfx, awardId: String(award.id) };
 }

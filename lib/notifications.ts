@@ -1,4 +1,4 @@
-import { one, q } from "./db";
+import { q } from "./db";
 import { ME_CTE, VISIBLE } from "./rfx";
 
 /**
@@ -49,14 +49,4 @@ export async function awaitingMyApproval(userId: string) {
      order by a.created_at`,
     [userId],
   );
-}
-
-export async function notificationCount(userId: string): Promise<number> {
-  const r = await one<{ n: number }>(
-    `select count(*)::int as n from events e join users u on u.id = $1
-      where e.workspace_id = u.workspace_id and e.kind = any($2) and e.created_at > coalesce(u.notifications_seen_at, now() - interval '30 days')
-        and not (e.user_id = u.id and e.actor = 'user')`,
-    [userId, KINDS],
-  );
-  return r?.n ?? 0;
 }

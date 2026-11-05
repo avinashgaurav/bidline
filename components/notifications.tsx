@@ -65,8 +65,8 @@ export function NotificationBell({ dark = false }: { dark?: boolean }) {
                   {i.actor === "claude" ? <ClaudeMark className="size-3" /> : <span className={`size-2 rounded-full ${i.actor === "approver" ? "bg-success" : "bg-primary"}`} />}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="line-clamp-2 text-[13px] leading-snug">{i.summary}</span>
-                  <span className="mt-0.5 block text-[11px] text-ink-secondary">
+                  <span className="line-clamp-2 text-[13px] leading-snug [overflow-wrap:anywhere]">{i.summary}</span>
+                  <span className="mt-0.5 block text-[12px] text-ink-secondary">
                     {i.actor === "claude" ? `Claude for ${i.user_name ?? "a teammate"}` : i.actor === "approver" ? "Approver" : i.user_name ?? "A teammate"}
                     {i.rfx_code ? <> · <span className="num">{i.rfx_code}</span></> : null} · {ago(i.created_at)}
                   </span>

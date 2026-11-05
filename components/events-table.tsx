@@ -17,6 +17,8 @@ export interface EventRowLite {
   award_total_inr: number | null; budget_inr: number;
 }
 
+const pastDue = (e: EventRowLite) => Boolean(e.due_at && !e.archived_at && ["draft", "issued", "evaluating"].includes(e.status) && new Date(e.due_at).getTime() < Date.now());
+
 type SortKey = "updated" | "due" | "title" | "progress" | "value";
 const SORTS: Array<[SortKey, string]> = [["updated", "Last activity"], ["due", "Due date"], ["title", "Name"], ["progress", "Quotes in"], ["value", "Value"]];
 
@@ -117,7 +119,7 @@ export function EventsTable({ events, view, canEdit, initial }: {
             const pct = e.supplier_count ? Math.round((e.responded / e.supplier_count) * 100) : 0;
             const waits = [
               e.unread_docs ? `${e.unread_docs} unread` : null,
-              e.needs_review ? `${e.needs_review} to check` : null,
+              e.needs_review ? `${e.needs_review} unreadable` : null,
               e.overdue_chases ? `${e.overdue_chases} overdue` : null,
               e.award_status === "sent" ? "approval" : null,
             ].filter(Boolean) as string[];
@@ -130,11 +132,12 @@ export function EventsTable({ events, view, canEdit, initial }: {
                       {e.restricted ? <Tip text="Restricted: only admins, its creator and named people can see it."><Lock className="size-3 shrink-0 text-ink-secondary" /></Tip> : null}
                     </span>
                     <span className="flex items-center gap-1.5 text-[12px] text-ink-secondary">
-                      <span className="rounded bg-night px-1 text-[10px] font-medium tracking-wide text-on-dark">{e.event_type}</span>
+                      <span className="rounded bg-night px-1 text-[11.5px] font-medium tracking-wide text-on-dark">{e.event_type}</span>
                       <span className="num">{e.code}</span> · {e.line_count} items
                       {e.due_at ? <> · due {new Date(e.due_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</> : null}
+                      {pastDue(e) ? <Tip text="Quotes were due and the event is not awarded yet."><span className="rounded-full bg-destructive/10 px-1.5 text-[12px] text-destructive">Overdue</span></Tip> : null}
                       {e.created_via === "claude" ? <Tip text="Created in Claude"><span className="inline-flex"><ClaudeMark className="size-3" /></span></Tip> : null}
-                      {e.created_via === "demo" ? <span className="rounded-full bg-lavender px-1.5 text-[10.5px] text-primary">Demo</span> : null}
+                      {e.created_via === "demo" ? <span className="rounded-full bg-lavender px-1.5 text-[12px] text-primary">Demo</span> : null}
                     </span>
                   </span>
                   <span><Tip text={st.help}><span tabIndex={0} className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] ${st.chip}`}><span className={`size-1.5 rounded-full ${st.dot}`} />{st.label}</span></Tip></span>

@@ -17,9 +17,11 @@ export async function AwardTab({ cmp, canEdit, canApprove }: { cmp: Comparison; 
   const base = await appUrlFromHeaders();
   const steps = new Map(await Promise.all(cmp.awards.map(async (a) => [a.id, await stepsOf(a.id)] as const)));
   const c = cmp.compliance;
+  // Only options that cover at least one line: a ₹0 option for 0 lines says nothing.
+  const qualifiedReady = cmp.questions.length > 0 && c.compliant.linesAwarded > 0;
   const options = [
     { label: c.naive.label, total: c.naive.totalInr, lines: c.naive.linesAwarded },
-    ...(cmp.questions.length ? [{ label: c.compliant.label, total: c.compliant.totalInr, lines: c.compliant.linesAwarded }] : []),
+    ...(qualifiedReady ? [{ label: c.compliant.label, total: c.compliant.totalInr, lines: c.compliant.linesAwarded }] : []),
     ...cmp.suppliers.map((s) => {
       const x = cmp.supplierInfo[s.code].single;
       return { label: `All lines to ${s.code} ${s.name}`, total: x.totalLevelDiscountApplied ? x.totalAfterStatedDiscountInr : x.totalInr, lines: x.linesPriced, note: x.totalLevelDiscountApplied ? `after the supplier's ${x.totalLevelDiscountPct}% discount` : x.totalLevelDiscountWithheldReason ?? "" };
@@ -32,7 +34,7 @@ export async function AwardTab({ cmp, canEdit, canApprove }: { cmp: Comparison; 
         <table className="mt-3 w-full text-sm">
           <thead className="text-left text-xs text-ink-secondary"><tr><th className="py-2 font-medium">Award basis</th><th className="py-2 text-right font-medium">Total, ex-GST</th><th className="py-2 text-right font-medium">Lines covered</th></tr></thead>
           <tbody>
-            {options.map((o) => (
+            {options.filter((o) => o.lines > 0).map((o) => (
               <tr key={o.label} className="border-t border-border">
                 <td className="py-2">{o.label}{"note" in o && o.note ? <span className="block text-xs text-ink-secondary">{o.note}</span> : null}</td>
                 <td className="num py-2 text-right">{inr(o.total)}</td>
@@ -41,7 +43,10 @@ export async function AwardTab({ cmp, canEdit, canApprove }: { cmp: Comparison; 
             ))}
           </tbody>
         </table>
-        {c.likeForLike.warning ? (
+        {cmp.questions.length && !qualifiedReady ? (
+          <p className="mt-3 rounded-lg bg-muted px-3 py-2 text-[13px] text-ink-secondary">The &ldquo;qualified suppliers only&rdquo; option appears once Claude has read the questionnaire answers and at least one supplier qualifies.</p>
+        ) : null}
+        {c.likeForLike.warning && c.likeForLike.linesInCommonBasis > 0 && qualifiedReady ? (
           <div className="mt-4 cell-review rounded-lg p-3 text-sm">
             <p>{c.likeForLike.warning}</p>
             <ul className="mt-1 list-disc pl-5">{c.likeForLike.scenarios.map((s) => <li key={s.key}>{s.label}: {inr(s.likeForLikeTotalInr)} on the {c.likeForLike.linesInCommonBasis} lines quoted by both</li>)}</ul>
@@ -51,7 +56,7 @@ export async function AwardTab({ cmp, canEdit, canApprove }: { cmp: Comparison; 
       {canEdit ? (
         <section className="rounded-xl bg-card p-4 ring-1 sm:p-5 ring-border">
           <p className="eyebrow mb-3">Draft award</p>
-          <AwardForm rfxId={cmp.rfx.id} suppliers={cmp.suppliers.map((s) => ({ code: s.code, name: s.name }))} hasQuestions={cmp.questions.length > 0} />
+          <AwardForm rfxId={cmp.rfx.id} suppliers={cmp.suppliers.map((s) => ({ code: s.code, name: s.name }))} hasQuestions={qualifiedReady} />
         </section>
       ) : null}
       {cmp.awards.map((a) => {
@@ -83,7 +88,7 @@ export async function AwardTab({ cmp, canEdit, canApprove }: { cmp: Comparison; 
                     <span className="num grid size-5 place-items-center rounded-full bg-card text-[11px]">{x.step + 1}</span>
                     <span className="font-medium">{x.name}</span>{x.above_inr !== null ? <span className="text-ink-secondary">over {inr(Number(x.above_inr))}</span> : null}
                     <span className={`rounded-full px-2 py-px text-[11.5px] capitalize ${STATUS[x.status] ?? "bg-card text-ink-secondary"}`}>{x.status === "sent" ? "Deciding now" : x.status.replace(/_/g, " ")}</span>
-                    {x.step > 0 && x.status !== "cancelled" ? <CopyButton text={`${base}/share/${x.token}`} label="Copy link" /> : null}
+                    {x.step > 0 && x.status === "sent" && (canEdit || canApprove) ? <CopyButton text={`${base}/share/${x.token}`} label="Copy link" /> : null}
                   </li>
                 ))}
               </ol>
@@ -91,8 +96,12 @@ export async function AwardTab({ cmp, canEdit, canApprove }: { cmp: Comparison; 
             {a.status === "sent" && canApprove ? <DecideAward rfxId={cmp.rfx.id} awardId={a.id} stepLabel={waiting ? `step ${waiting.step + 1} of ${st.length}, as ${waiting.name}` : null} /> : null}
             {a.decision_note ? <p className="text-sm">{a.status === "withdrawn" ? "Reason for withdrawing" : a.status === "expired" ? "Expired" : "Approver's note"}: &ldquo;{a.decision_note}&rdquo;</p> : null}
             <div className="flex flex-wrap items-center gap-2">
-              <code className="min-w-0 flex-1 truncate rounded-lg bg-muted px-3 py-2 text-xs">{link}</code>
-              <CopyButton text={link} label="Copy approval link" />
+              {(canEdit || canApprove) && a.status === "sent" ? (
+                <>
+                  <code className="min-w-0 flex-1 truncate rounded-lg bg-muted px-3 py-2 text-xs">{link}</code>
+                  <CopyButton text={link} label="Copy approval link" />
+                </>
+              ) : <span className="flex-1" />}
               <a className="inline-flex h-8 items-center rounded-full bg-secondary px-3 text-[14px]" href={`/api/rfx/${cmp.rfx.id}/export/award?award=${a.id}`}>Download .md</a>
             </div>
             <details>

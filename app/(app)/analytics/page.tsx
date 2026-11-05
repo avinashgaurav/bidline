@@ -12,8 +12,8 @@ export const maxDuration = 60;
 export default async function AnalyticsPage() {
   const user = await requireUser();
   const s = await spend(user.id);
-  const awarded = s.byEvent.reduce((a, e) => a + (e.awarded ?? 0), 0);
-  const baseline = s.byEvent.reduce((a, e) => a + (e.awarded !== null ? e.baseline ?? 0 : 0), 0);
+  const awarded = s.totals.awarded;
+  const baseline = s.totals.baseline;
   const planned = s.byEvent.filter((e) => e.awarded === null && !["closed"].includes(e.status)).reduce((a, e) => a + e.budget, 0);
   const saved = baseline ? baseline - awarded : 0;
   const any = awarded > 0;

@@ -67,7 +67,7 @@ export function toolAllowed(t: Pick<ToolInfo, "name" | "readOnly">, role: string
 /** Integrations beside the Claude connector: what is live today and what is planned. */
 export const INTEGRATIONS: Array<{ key: string; name: string; what: string; status: "live" | "planned" }> = [
   { key: "claude", name: "Claude (MCP connector)", what: "Your Claude reads supplier documents and works with Bidline's figures.", status: "live" },
-  { key: "smtp", name: "Email (your mailbox over SMTP)", what: "Send follow-ups to suppliers from your own address.", status: "live" },
+  { key: "smtp", name: "Email from your own mailbox", what: "Send follow-ups to suppliers from your own address.", status: "live" },
   { key: "gmail", name: "Gmail and Outlook sign-in", what: "Connect a mailbox with one click instead of an app password, and pick up supplier replies.", status: "planned" },
   { key: "whatsapp", name: "WhatsApp Business", what: "Send follow-ups where many suppliers reply first.", status: "planned" },
   { key: "erp", name: "Tally, Zoho Books and SAP", what: "Turn an approved award into purchase-order lines in your accounts system.", status: "planned" },

@@ -33,9 +33,11 @@ export async function sendDueReminders(now = new Date()): Promise<{ sent: number
     const n = c.reminders_sent + 1;
     const subject = `Reminder${n > 1 ? ` ${n}` : ""}: ${c.subject ?? `${c.code} ${c.title}`}`;
     const text = `Hello,\n\nA gentle reminder about our message below, which asked for a reply by ${new Date(c.due_at).toLocaleDateString("en-IN", { dateStyle: "medium" })}. We still need these details to complete our comparison.\n\nThank you.\n\n----\n${c.message}`;
+    // Claim the reminder first, so a retry after a timeout never emails the supplier twice.
+    const claimed = await q("update chases set reminders_sent = $2, last_reminded_at = $3 where id = $1 and reminders_sent = $4 returning id", [c.id, n, now.toISOString(), c.reminders_sent]);
+    if (!claimed.length) continue;
     try {
       await sendMail(c.owner, { to: c.to_email, subject, text });
-      await q("update chases set reminders_sent = $2, last_reminded_at = $3 where id = $1", [c.id, n, now.toISOString()]);
       await logEvent({ userId: c.owner, rfxId: c.rfx_id, actor: "system", kind: "reminder_sent", summary: `Sent automatic reminder ${n} of ${MAX_REMINDERS} to ${c.to_email} for ${c.code}.`, detail: { to: c.to_email, chaseId: c.id, reminder: n } });
       sent++;
     } catch (e) {

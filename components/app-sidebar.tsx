@@ -160,7 +160,7 @@ function SidebarBody({ user, workspace, workspaces, events, connected, switchAct
       <div className="flex items-center gap-2 px-4 pt-4 pb-3"><Logo dark /></div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 [scrollbar-width:thin]">
-        <NavLink href="/" active={path === "/"} icon={<Home className={ic} />} label="Home" />
+        <NavLink href="/" active={path === "/" || path === "/my-work"} icon={<Home className={ic} />} label="Home" />
 
         {pinned.length || events.some((e) => e.starred) ? (
           <div className="mt-4">
@@ -241,7 +241,7 @@ function AccountMenu({ user, workspace, workspaces, connected, switchAction, log
           <span className={`absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full ring-2 ring-night ${connected ? "bg-[#3fbf7f]" : "bg-[#f0a43c]"}`} aria-hidden />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] leading-tight">{user.email}</span>
+          <span className="block truncate text-[13px] leading-tight">{user.name}</span>
           <span className="block truncate text-[11px] leading-tight text-fog/70">{workspace.name} · {roleLabel(user.role)}</span>
         </span>
         <ChevronDown className="size-4 shrink-0 text-fog/70" />

@@ -21,7 +21,7 @@ export function todos(events: RfxListRow[], approvals: Awaited<ReturnType<typeof
     if (e.archived_at) continue;
     if (e.overdue_chases) out.push({ key: `od-${e.id}`, rfx: e, icon: Mail, tone: "warn", text: `${e.overdue_chases} follow-up${e.overdue_chases === 1 ? " is" : "s are"} past the reply-by date`, action: "Follow up", href: `/rfx/${e.id}?tab=chase` });
     if (e.unread_docs && canEdit) out.push({ key: `ud-${e.id}`, rfx: e, icon: FileText, tone: "info", text: `${e.unread_docs} supplier document${e.unread_docs === 1 ? "" : "s"} for Claude to read`, action: "Open documents", href: `/rfx/${e.id}?tab=documents` });
-    if (e.needs_review) out.push({ key: `nr-${e.id}`, rfx: e, icon: AlertCircle, tone: "warn", text: `${e.needs_review} price${e.needs_review === 1 ? "" : "s"} could not be read and need checking`, action: "Check", href: `/rfx/${e.id}?tab=comparison` });
+    if (e.needs_review) out.push({ key: `nr-${e.id}`, rfx: e, icon: AlertCircle, tone: "warn", text: `${e.needs_review} price${e.needs_review === 1 ? " is" : "s are"} unreadable on the supplier's file`, action: "Check", href: `/rfx/${e.id}?tab=comparison` });
     if (e.award_status === "sent" && !approvals.some((a) => a.rfx_id === e.id)) out.push({ key: `aw-${e.id}`, rfx: e, icon: Stamp, tone: "info", text: "Award sent, waiting for the approver", action: "See status", href: `/rfx/${e.id}?tab=award` });
     if (e.status === "evaluating" && !e.award_status && !e.unread_docs && canEdit) out.push({ key: `rd-${e.id}`, rfx: e, icon: Scale, tone: "go", text: "Quotes are in. Ready to compare and draft the award", action: "Compare", href: `/rfx/${e.id}?tab=comparison` });
   }

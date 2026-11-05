@@ -15,7 +15,7 @@ export function QuestionnaireTab({ cmp }: { cmp: Comparison }) {
   }
   return (
     <div className="grid gap-4">
-      <p className="text-sm text-ink-secondary">Claude records each supplier&apos;s answers and what their certificates say. Bidline decides pass or fail. An expired certificate, the wrong version of a standard or a figure below the threshold fails, whatever the answer says. A supplier whose answers have not been read shows as &ldquo;Not assessed&rdquo;, not &ldquo;Not qualified&rdquo;.</p>
+      <p className="text-sm text-ink-secondary">Claude records each supplier&apos;s answers and what their certificates say. Bidline decides pass or fail. An expired certificate, the wrong version of a standard or a figure below the threshold fails, whatever the answer says. A supplier whose answers have not been read shows as &ldquo;Answers not read yet&rdquo;, not &ldquo;Not qualified&rdquo;.</p>
       <div className="overflow-x-auto rounded-xl bg-card ring-1 ring-border">
         <table className="w-full text-sm">
           <thead className="bg-[var(--grid-head)] text-left text-xs text-ink-secondary">
@@ -27,7 +27,7 @@ export function QuestionnaireTab({ cmp }: { cmp: Comparison }) {
                   <th key={s.code} className="min-w-[150px] px-3 py-3 font-medium">
                     {s.code} {s.name.split(" ")[0]}
                     <span className={`mt-1 block w-fit rounded-full px-2 py-0.5 text-[12px] font-normal ${!v.assessed ? "bg-muted text-ink-secondary" : v.qualified ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
-                      {!v.assessed ? "Not assessed" : v.qualified ? "Qualified" : "Not qualified"}
+                      {!v.assessed ? "Answers not read yet" : v.qualified ? "Qualified" : "Not qualified"}
                     </span>
                   </th>
                 );

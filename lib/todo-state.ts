@@ -1,6 +1,7 @@
 import { one, q } from "./db";
 import { logEvent } from "./events";
 import { BadInput, resolveRfx } from "./rfx";
+import { can, deniedMessage } from "./roles";
 
 /**
  * What people decided about a to-do: who it is assigned to and until when it
@@ -17,6 +18,10 @@ export async function todoStates(workspaceId: string): Promise<Map<string, TodoS
 
 export async function setTodo(userId: string, input: { key: string; rfxId: string; text: string; assignTo?: string | null; snoozeDays?: number | null }) {
   const rfx = await resolveRfx(userId, input.rfxId);
+  if (!can(rfx.my_role, "edit") && !can(rfx.my_role, "approve")) throw new BadInput(deniedMessage(rfx.my_role, "edit"));
+  if (input.snoozeDays !== undefined && input.snoozeDays !== null && !(Number.isFinite(input.snoozeDays) && input.snoozeDays > 0 && input.snoozeDays <= 90)) throw new BadInput("Snooze for 1 to 90 days.");
+  if (!/^[a-z]{2}-[a-z0-9_]{3,40}$/.test(input.key)) throw new BadInput("Unknown to-do.");
+  input = { ...input, text: String(input.text ?? "").slice(0, 160) };
   const me = await one<{ name: string }>("select name from users where id = $1", [userId]);
   let assignee: { id: string; name: string } | null = null;
   if (input.assignTo) {

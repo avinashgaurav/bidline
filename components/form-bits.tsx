@@ -4,13 +4,13 @@ import { useFormStatus } from "react-dom";
 import { Button } from "@/components/ui/button";
 import type { FormState } from "@/app/actions";
 
-export function SubmitButton({ children, variant = "default", size = "default", className }: {
-  children: React.ReactNode; variant?: "default" | "secondary" | "outline" | "destructive" | "ghost"; size?: "default" | "sm" | "lg"; className?: string;
+export function SubmitButton({ children, variant = "default", size = "default", className, pendingLabel = "Saving..." }: {
+  children: React.ReactNode; variant?: "default" | "secondary" | "outline" | "destructive" | "ghost"; size?: "default" | "sm" | "lg"; className?: string; pendingLabel?: string;
 }) {
   const { pending } = useFormStatus();
   return (
     <Button type="submit" variant={variant} size={size} disabled={pending} className={className}>
-      {pending ? "Working..." : children}
+      {pending ? pendingLabel : children}
     </Button>
   );
 }

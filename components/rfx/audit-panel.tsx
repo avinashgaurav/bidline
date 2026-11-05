@@ -55,7 +55,7 @@ function Filtered({ rfxId, entries, onClose }: { rfxId: string; entries: FeedEnt
               {l} <span className="num opacity-70">{k === "all" ? entries.length : entries.filter((e) => e.actor === k).length}</span>
             </button>
           ))}
-          <a href={`/api/rfx/${rfxId}/export/transcript`} className="ml-auto inline-flex items-center gap-1 text-[12px] text-primary hover:underline"><Download className="size-3.5" /> .md</a>
+          <a href={`/api/rfx/${rfxId}/export/transcript`} className="ml-auto inline-flex items-center gap-1 text-[12px] text-primary hover:underline"><Download className="size-3.5" /> Download</a>
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 [scrollbar-width:thin]">

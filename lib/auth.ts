@@ -143,19 +143,21 @@ export async function userByMcpToken(token: string): Promise<User | null> {
 
 export const normaliseEmail = (e: string) => e.trim().toLowerCase();
 
-export async function createUser(opts: { email: string; name: string; password: string; company?: string }): Promise<User> {
+export async function createUser(opts: { email: string; name: string; password: string; company?: string; invite?: string | null }): Promise<User> {
   const id = newId("usr");
   const email = normaliseEmail(opts.email);
   await q(
     "insert into users (id, email, name, password_hash, mcp_token) values ($1,$2,$3,$4,$5)",
     [id, email, opts.name.trim() || email.split("@")[0], await hashPassword(opts.password), newMcpToken()],
   );
-  // Invited? Join the inviting workspace with the invited role. Otherwise start a workspace of one's own.
-  const invite = await one<{ id: string; workspace_id: string; role: string }>(
-    "select id, workspace_id, role from workspace_invites where email = $1 and accepted_at is null order by created_at limit 1", [email]);
+  // Signing up from an invite link joins that workspace with the invited role: the link,
+  // not just the email address, is the proof. Otherwise start a workspace of one's own.
+  const invite = opts.invite
+    ? await one<{ id: string; workspace_id: string }>("select id, workspace_id from workspace_invites where id = $1 and email = $2 and accepted_at is null", [opts.invite, email])
+    : null;
   if (invite) {
     await q("insert into workspace_members (workspace_id, user_id, role, added_by) select workspace_id, $2, role, invited_by from workspace_invites where id = $1 on conflict do nothing", [invite.id, id]);
-    await q("update workspace_invites set accepted_at = now() where email = $1 and accepted_at is null", [email]);
+    await q("update workspace_invites set accepted_at = now() where id = $1", [invite.id]);
     await q("update users set workspace_id = $2 where id = $1", [id, invite.workspace_id]);
   } else {
     const ws = await createWorkspace(id, opts.company?.trim() || `${(opts.name.trim() || email).split(/[\s@]/)[0]}'s workspace`);
@@ -234,4 +236,16 @@ export function verifyExport(token: string, rfxId: string, kind: string): string
   const [userId, rid, k, exp] = payload.split(".");
   if (rid !== rfxId || k !== kind || Number(exp) < Date.now()) return null;
   return userId;
+}
+
+/** Accept an invite link while signed in: only for the address it was sent to. */
+export async function acceptInvite(userId: string, inviteId: string): Promise<string | null> {
+  const row = await one<{ workspace_id: string; role: string; invited_by: string | null }>(
+    `select i.workspace_id, i.role, i.invited_by from workspace_invites i join users u on u.email = i.email
+      where i.id = $1 and u.id = $2 and i.accepted_at is null`, [inviteId, userId]);
+  if (!row) return null;
+  await q("insert into workspace_members (workspace_id, user_id, role, added_by) values ($1,$2,$3,$4) on conflict do nothing", [row.workspace_id, userId, row.role, row.invited_by]);
+  await q("update workspace_invites set accepted_at = now() where id = $1", [inviteId]);
+  await q("update users set workspace_id = $2 where id = $1", [userId, row.workspace_id]);
+  return row.workspace_id;
 }

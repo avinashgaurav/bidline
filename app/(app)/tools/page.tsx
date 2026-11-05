@@ -12,7 +12,8 @@ import { CopyButton } from "@/components/copy-button";
 
 export const metadata = { title: "Claude tools · Bidline" };
 
-const firstSentence = (s: string) => (s.match(/^.*?[.!?](\s|$)/)?.[0] ?? s).trim();
+// The first sentence, without stopping at "e.g." or "i.e.".
+const firstSentence = (s: string) => (s.replace(/\b(e\.g|i\.e)\./g, "$1\u0000").match(/^.*?[.!?](\s|$)/)?.[0] ?? s).replace(/\u0000/g, ".").trim();
 
 export default async function ToolsPage() {
   const user = await requireUser();
@@ -30,7 +31,7 @@ export default async function ToolsPage() {
         <div>
           <h1 className="text-[24px] leading-tight tracking-[-0.01em]">Claude tools and integrations</h1>
           <p className="mt-1 max-w-[72ch] text-[14px] text-ink-secondary">
-            Bidline has no AI of its own. It gives your Claude {tools.length} tools: Claude chooses the right one when you ask in plain words. Your Claude can use {mine} of them
+            Bidline has no AI of its own. It gives your Claude a set of tools, listed below by job: you just ask in plain words and Claude picks the right one. Your Claude can use {mine} of them
             ({roleLabel(user.role)} role{off.length ? `, ${off.length} switched off for the workspace` : ""}).{admin ? " As an admin you can switch any tool off for everyone." : ""}
           </p>
         </div>
@@ -84,8 +85,7 @@ export default async function ToolsPage() {
                 <li key={name} className="grid gap-2 border-b border-border px-4 py-2.5 last:border-0 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:gap-4">
                   <span className="min-w-0">
                     <span className="flex flex-wrap items-center gap-2">
-                      <span className="text-[14px]">{t.title}</span>
-                      <code className="text-[11.5px] text-ink-secondary">{t.name}</code>
+                      <span className="text-[14px]" title={`Technical name: ${t.name}`}>{t.title}</span>
                       <span className={`rounded-full px-1.5 py-px text-[11px] ${t.readOnly ? "bg-muted text-ink-secondary" : "bg-secondary text-primary"}`}>{t.readOnly ? "Reads only" : "Makes changes"}</span>
                     </span>
                     <span className="mt-0.5 block text-[12.5px] text-ink-secondary">{firstSentence(t.description)}</span>

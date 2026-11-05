@@ -35,6 +35,8 @@ export interface AuditFilter {
   search?: string | null;
   before?: number | null;
   limit?: number;
+  /** Leave out Claude's look-ups, which change nothing. */
+  noLookups?: boolean;
 }
 
 export async function listAudit(userId: string, f: AuditFilter, opts: { all: boolean }): Promise<AuditRow[]> {
@@ -57,6 +59,7 @@ export async function listAudit(userId: string, f: AuditFilter, opts: { all: boo
   if (f.to) add("e.created_at < ?::date + 1", f.to);
   if (f.search) add("(e.summary ilike ? or e.user_request ilike ?)", `%${f.search}%`);
   if (f.before) add("e.id < ?", f.before);
+  if (f.noLookups) where.push("e.kind <> 'query'");
   args.push(Math.min(f.limit ?? 100, 500));
   return q<AuditRow>(
     `with ${ME_CTE}

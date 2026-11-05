@@ -57,8 +57,8 @@ export async function logEvent(e: EventInput): Promise<void> {
 /** Highest event id for an RFx (or a user's whole workspace). Screens poll this. */
 export async function versionOf(opts: { rfxId?: string; userId?: string }): Promise<number> {
   const row = opts.rfxId
-    ? await one<{ v: string | null }>("select max(id) as v from events where rfx_id = $1", [opts.rfxId])
-    : await one<{ v: string | null }>("select max(id) as v from events where workspace_id = (select workspace_id from users where id = $1)", [opts.userId]);
+    ? await one<{ v: string | null }>("select max(id) as v from events where rfx_id = $1 and kind <> 'query'", [opts.rfxId])
+    : await one<{ v: string | null }>("select max(id) as v from events where workspace_id = (select workspace_id from users where id = $1) and kind <> 'query'", [opts.userId]);
   return Number(row?.v ?? 0);
 }
 

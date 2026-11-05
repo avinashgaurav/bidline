@@ -75,8 +75,8 @@ function Entry({ e, showEvent, dense }: { e: FeedEntry; showEvent: boolean; dens
       </div>
       <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px]">
         <span className="rounded bg-muted px-1.5 py-px text-ink-secondary">{kindLabel(e.kind)}</span>
-        <span className="text-ink-secondary">{item.type}:</span><span className="font-medium">{item.name}</span>
-        {showEvent && e.rfx_id ? <Link href={`/rfx/${e.rfx_id}`} className="num text-primary hover:underline">{e.rfx_code}</Link> : null}
+        <span className="text-ink-secondary">{item.type}:</span>{showEvent && e.rfx_id && item.name === e.rfx_code ? <Link href={`/rfx/${e.rfx_id}`} className="num font-medium text-primary hover:underline">{item.name}</Link> : <span className="font-medium">{item.name}</span>}
+        {showEvent && e.rfx_id && item.name !== e.rfx_code ? <Link href={`/rfx/${e.rfx_id}`} className="num text-primary hover:underline">{e.rfx_code}</Link> : null}
       </p>
       <p className={`mt-0.5 leading-snug ${dense ? "text-[13px]" : "text-[13.5px]"}`}>{e.summary}</p>
       {hasMore ? (

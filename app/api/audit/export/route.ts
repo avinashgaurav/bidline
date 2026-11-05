@@ -9,7 +9,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const cell = (v: unknown) => {
-  const s = v === null || v === undefined ? "" : typeof v === "string" ? v : JSON.stringify(v);
+  let s = v === null || v === undefined ? "" : typeof v === "string" ? v : JSON.stringify(v);
+  // A cell starting with = + - @ would run as a formula in Excel.
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 

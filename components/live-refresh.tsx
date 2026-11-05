@@ -25,6 +25,7 @@ export function LiveRefresh({ initial }: { initial: number }) {
       try {
         const res = await fetch("/api/rfx/all/version", { cache: "no-store" });
         if (!res.ok) return;
+        // look-ups by Claude do not change anything, so they never refresh the page
         const body = (await res.json()) as { version: number; latest?: { summary: string; who: string; mine: boolean } | null };
         if (stop || body.version <= seen.current) return;
         seen.current = body.version;
@@ -39,7 +40,7 @@ export function LiveRefresh({ initial }: { initial: number }) {
         // offline for a moment; the next tick tries again
       }
     };
-    const id = setInterval(tick, 3000);
+    const id = setInterval(tick, 10000);
     return () => {
       stop = true;
       clearInterval(id);

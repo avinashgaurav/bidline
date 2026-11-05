@@ -27,7 +27,7 @@ export const can = (role: string | null | undefined, perm: Perm) =>
 export const ROLES: Array<{ key: Role; label: string; help: string }> = [
   { key: "admin", label: "Admin", help: "Everything, plus the team, Claude tools, restricted events and the full audit log." },
   { key: "buyer", label: "Buyer", help: "Creates and runs sourcing events: line items, suppliers, quotes, follow-ups and award drafts." },
-  { key: "approver", label: "Approver", help: "Sees every event and the audit log, approves or rejects awards, and adds notes. Cannot change prices." },
+  { key: "approver", label: "Approver", help: "Sees the events they can open and the audit log, approves or rejects awards, and adds notes. Cannot change prices." },
   { key: "viewer", label: "Viewer", help: "Read-only. Can open events, documents and the comparison, but cannot change anything." },
 ];
 

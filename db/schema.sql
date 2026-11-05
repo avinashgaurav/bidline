@@ -393,8 +393,8 @@ insert into workspace_members (workspace_id, user_id, role)
 update users u set workspace_id = (select m.workspace_id from workspace_members m where m.user_id = u.id order by m.created_at limit 1)
   where u.workspace_id is null;
 update rfx r set workspace_id = u.workspace_id from users u where r.user_id = u.id and r.workspace_id is null;
-update events e set workspace_id = r.workspace_id from rfx r where e.rfx_id = r.id and e.workspace_id is null;
-update events e set workspace_id = u.workspace_id from users u where e.rfx_id is null and e.user_id = u.id and e.workspace_id is null;
+-- (Audit entries are not backfilled here: the insert trigger below fills their workspace,
+-- and changing a sealed entry would break its seal.)
 
 -- Workspace settings an admin controls: automatic reminders, approval steps by value.
 --   { "reminders": { "enabled": bool, "everyDays": int },
@@ -458,24 +458,28 @@ alter table chases add column if not exists last_reminded_at timestamptz;
 alter table events add column if not exists prev_hash text;
 alter table events add column if not exists hash text;
 
+alter table events add column if not exists seq bigint;
+create unique index if not exists events_workspace_seq_idx on events(workspace_id, seq);
+
 create or replace function events_hash(prev text, e events) returns text language sql immutable as $fn$
   select encode(sha256(convert_to(
-    coalesce(prev, '') || '|' || e.id::text || '|' || coalesce(e.workspace_id, '') || '|' || coalesce(e.rfx_id, '') || '|' ||
+    coalesce(prev, '') || '|' || coalesce(e.seq::text, '') || '|' || e.id::text || '|' || coalesce(e.workspace_id, '') || '|' || coalesce(e.rfx_id, '') || '|' ||
     coalesce(e.user_id, '') || '|' || e.actor || '|' || e.kind || '|' || coalesce(e.tool, '') || '|' ||
     coalesce(e.user_request, '') || '|' || e.summary || '|' || e.detail::text || '|' ||
     to_char(e.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US'), 'UTF8')), 'hex')
 $fn$;
 
 create or replace function events_chain() returns trigger language plpgsql as $fn$
-declare prev text;
+declare last record;
 begin
   if new.workspace_id is null then
     new.workspace_id := coalesce((select workspace_id from rfx where id = new.rfx_id), (select workspace_id from users where id = new.user_id));
   end if;
   perform pg_advisory_xact_lock(hashtext('events:' || coalesce(new.workspace_id, '')));
-  select hash into prev from events where workspace_id is not distinct from new.workspace_id and hash is not null order by id desc limit 1;
-  new.prev_hash := prev;
-  new.hash := events_hash(prev, new);
+  select seq, hash into last from events where workspace_id is not distinct from new.workspace_id and seq is not null order by seq desc limit 1;
+  new.seq := coalesce(last.seq, 0) + 1;
+  new.prev_hash := last.hash;
+  new.hash := events_hash(last.hash, new);
   return new;
 end $fn$;
 drop trigger if exists events_chain_trg on events;
@@ -492,19 +496,7 @@ end $fn$;
 drop trigger if exists events_no_update_trg on events;
 create trigger events_no_update_trg before update on events for each row execute function events_no_update();
 
--- Seal entries written before the chain existed, oldest first, once.
-do $do$
-declare r events; prev text; ws text := '__none__';
-begin
-  for r in select * from events where hash is null order by workspace_id nulls first, id loop
-    if r.workspace_id is distinct from ws then
-      ws := r.workspace_id;
-      select hash into prev from events where workspace_id is not distinct from r.workspace_id and hash is not null order by id desc limit 1;
-    end if;
-    update events set prev_hash = prev, hash = events_hash(prev, r) where id = r.id;
-    prev := events_hash(prev, r);
-  end loop;
-end $do$;
+
 
 -- Stars: a person's favourite events, shown under Pinned in the sidebar.
 create table if not exists rfx_stars (
@@ -548,3 +540,32 @@ create table if not exists notification_channels (
 alter table awards add column if not exists drafted_by_user text references users(id) on delete set null;
 -- Which events each person wants an email about (Settings, Notifications).
 alter table users add column if not exists notify jsonb not null default '{}'::jsonb;
+
+-- One code per event within a workspace, so "RFX-2026-1268" always means one event.
+create unique index if not exists rfx_workspace_code_idx on rfx(workspace_id, lower(code));
+
+-- The seal, version 2: each entry gets the next number in its workspace while the
+-- lock is held, and points at the entry numbered one before it. A single line,
+-- never a fork; a gap in the numbers or a changed entry shows in the check.
+
+
+
+
+
+-- Re-seal once, in id order per workspace, when entries have no number yet.
+do $do$
+declare r events; prev text; n bigint; ws text := '__none__';
+begin
+  if not exists (select 1 from events where seq is null) then return; end if;
+  alter table events disable trigger events_no_update_trg;
+  for r in select * from events order by workspace_id nulls first, id loop
+    if r.workspace_id is distinct from ws then
+      ws := r.workspace_id; prev := null; n := 0;
+    end if;
+    n := n + 1;
+    r.seq := n;
+    update events set seq = n, prev_hash = prev, hash = events_hash(prev, r) where id = r.id;
+    prev := events_hash(prev, r);
+  end loop;
+  alter table events enable trigger events_no_update_trg;
+end $do$;

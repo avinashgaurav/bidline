@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { json, newId, one, q, type Row } from "./db";
 import type { CalcRules, PriorPo, RfxLine, UomConversion } from "./calc/normalise";
 import type { QuestionSpec } from "./calc/questionnaire";
@@ -109,7 +110,8 @@ export interface RfxListRow extends RfxRow {
   starred: boolean;
 }
 
-export async function listRfxs(userId: string): Promise<RfxListRow[]> {
+/** Every event this person can see, with counts. Cached per request: the layout and the page both ask. */
+export const listRfxs = cache(async (userId: string): Promise<RfxListRow[]> => {
   return q<RfxListRow>(
     `with ${ME_CTE} select r.*,
        (select count(*)::int from rfx_lines l where l.rfx_id = r.id) as line_count,
@@ -127,12 +129,12 @@ export async function listRfxs(userId: string): Promise<RfxListRow[]> {
        (select count(*)::int from quote_cells qc join submissions s on s.id = qc.submission_id
           where qc.rfx_id = r.id and not s.superseded and qc.raw_status = 'illegible') as needs_review,
        (select u.name from users u where u.id = r.user_id) as owner_name,
-       (select max(e.created_at) from events e where e.rfx_id = r.id) as last_activity,
+       (select e.created_at from events e where e.rfx_id = r.id order by e.id desc limit 1) as last_activity,
        exists (select 1 from rfx_stars st where st.rfx_id = r.id and st.user_id = me.id) as starred
      from rfx r, me where ${VISIBLE} order by r.updated_at desc`,
     [userId],
   );
-}
+});
 
 export async function getLines(rfxId: string): Promise<RfxLine[]> {
   const rows = await q<Row>(`select * from rfx_lines where rfx_id = $1 order by no`, [rfxId]);
