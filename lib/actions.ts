@@ -2,14 +2,14 @@ import { randomBytes } from "node:crypto";
 import { json, newId, one, q, type Row } from "./db";
 import { logEvent, type Actor } from "./events";
 import {
-  BadInput, NotFound, addSupplier, createRfx, getLines, getSuppliers, qualityGate, removeLines,
+  BadInput, NotFound, addSupplier, createRfx, getLines, getQuestions, getSuppliers, qualityGate, removeLines,
   resolveRfx, resolveSupplier, setAssumption, upsertLines, upsertQuestions,
   type LineInput, type QuestionInput, type RfxRow, type SupplierInput, type SupplierRow,
 } from "./rfx";
 import { extractionSchema, validateExtraction, type Extraction } from "./extract/contract";
 import { getDocument, storeDocument, storeTextDocument, type DocumentRow } from "./files";
 import { cellKey, loadComparison } from "./comparison";
-import { chaseMessage, type ChaseKind } from "./calc/chase";
+import { VAGUE, chaseMessage, type ChaseItem, type ChaseKind } from "./calc/chase";
 import type { RawQuote } from "./calc/normalise";
 import type { ReadAnswer } from "./calc/questionnaire";
 import { buildAwardSnapshot, awardMarkdown, type ScenarioKey } from "./award";
@@ -101,11 +101,41 @@ export async function upsertLinesAction(ctx: ActionCtx, rfxRef: string | null | 
   const before = await getLines(rfx.id);
   const touched = await upsertLines(rfx.id, lines);
   const after = await getLines(rfx.id);
+  // Say exactly what changed, field by field, so the audit trail needs no diffing.
+  const FIELDS: Array<[keyof (typeof after)[number], string]> = [
+    ["sku", "SKU"], ["group", "category"], ["desc", "description"], ["spec", "specification"], ["uom", "unit"],
+    ["pack_size", "pack size"], ["qty", "quantity"], ["hsn", "HSN"], ["baseline_inr", "budget per unit"],
+  ];
+  const show = (v: unknown) => {
+    const t = v && typeof v === "object" ? JSON.stringify(v) : String(v ?? "");
+    return !t || t === "{}" ? "none" : t.length > 80 ? `${t.slice(0, 77)}...` : t;
+  };
+  const changes = touched.map((no) => {
+    const b = before.find((l) => l.no === no);
+    const a = after.find((l) => l.no === no);
+    if (!a) return null;
+    if (!b) return `added line ${no} (${show(a.desc)}, ${a.qty} ${a.uom})`;
+    const diff = FIELDS.filter(([k]) => show(b[k]) !== show(a[k])).map(([k, label]) => `${label} ${show(b[k])} -> ${show(a[k])}`);
+    return diff.length ? `line ${no}: ${diff.join(", ")}` : null;
+  }).filter(Boolean);
+  const pick = (l: (typeof after)[number]) => ({
+    no: l.no, sku: l.sku, group: l.group, desc: l.desc, spec: l.spec, uom: l.uom, packSize: l.pack_size, qty: l.qty, hsn: l.hsn, budgetInr: l.baseline_inr,
+  });
+  // A save that changed nothing (the app's Save pressed twice) is not a change.
+  // Anything else is always logged, even if the diff above misses a field.
+  const sameAsBefore = touched.every((no) => {
+    const b = before.find((l) => l.no === no);
+    const a = after.find((l) => l.no === no);
+    return b && a && JSON.stringify(pick(b)) === JSON.stringify(pick(a));
+  });
+  if (sameAsBefore) return { rfx, touched, gate: qualityGate(after) };
   await log(ctx, rfx.id, "lines_changed",
-    `Added or changed line${touched.length === 1 ? "" : "s"} ${touched.join(", ")} on ${rfx.code}.`,
+    changes.length
+      ? `${changes.join("; ").replace(/^\w/, (c) => c.toUpperCase())} on ${rfx.code}.`
+      : `Updated line${touched.length === 1 ? "" : "s"} ${touched.join(", ")} on ${rfx.code}.`,
     {
-      before: before.filter((l) => touched.includes(l.no)).map((l) => ({ no: l.no, desc: l.desc, uom: l.uom, qty: l.qty })),
-      after: after.filter((l) => touched.includes(l.no)).map((l) => ({ no: l.no, desc: l.desc, uom: l.uom, qty: l.qty })),
+      before: before.filter((l) => touched.includes(l.no)).map(pick),
+      after: after.filter((l) => touched.includes(l.no)).map(pick),
     });
   return { rfx, touched, gate: qualityGate(after) };
 }
@@ -113,6 +143,7 @@ export async function upsertLinesAction(ctx: ActionCtx, rfxRef: string | null | 
 export async function removeLinesAction(ctx: ActionCtx, rfxRef: string | null | undefined, nos: number[], reason: string) {
   const rfx = await resolveRfx(ctx.userId, rfxRef);
   await removeLines(rfx.id, nos);
+  await q(`delete from line_notes where rfx_id = $1 and line_no = any($2::int[])`, [rfx.id, nos]);
   await log(ctx, rfx.id, "lines_removed", `Removed line${nos.length === 1 ? "" : "s"} ${nos.join(", ")} from ${rfx.code}.`, { reason });
   return { rfx };
 }
@@ -403,7 +434,7 @@ export async function submitQuoteAction(ctx: ActionCtx, input: {
                kind = case when kind = 'other' then 'quotation' else kind end where id = $1`, [doc.id, supplier.id]);
   }
   await q(`update suppliers set status = 'responded' where id = $1 and status in ('invited','declined')`, [supplier.id]);
-  await q(`update chases set answered_at = now() where supplier_id = $1 and answered_at is null`, [supplier.id]);
+  await closeAnsweredFollowUps(supplier.id);
   await q(`update rfx set status = 'evaluating' where id = $1 and status in ('draft','issued')`, [rfx.id]);
 
   await log(ctx, rfx.id, "quote_read",
@@ -439,7 +470,66 @@ export async function submitQuestionnaireAction(ctx: ActionCtx, input: {
     `Read ${input.answers.length} questionnaire answer${input.answers.length === 1 ? "" : "s"} for ${supplier.code} ${supplier.name}` +
     `${doc ? ` from ${doc.filename}` : ""}. Verdict: ${verdict.qualified ? "qualified" : verdict.assessed ? `not qualified (failed ${verdict.failedMandatory.join(", ") || "a mandatory question"})` : "not assessed"}.`,
     { documentId: doc?.id ?? null });
+  await closeAnsweredFollowUps(supplier.id);
   return { rfx, supplier, verdict, cmp };
+}
+
+/**
+ * A follow-up is answered only when every item it asked about now has an
+ * answer from this supplier, judged item by item: a missing or disputed price
+ * is answered by a firm price in the supplier's newest reading of that line (or an
+ * explicit "not quoting"), a term by a stated, non-vague value across the
+ * supplier's quotes, a question by
+ * an answer, a missing certificate by an attached document. Prices carried
+ * forward from an earlier revision need the supplier's confirmation, so a
+ * person closes those.
+ */
+async function closeAnsweredFollowUps(supplierId: string) {
+  const open = await q<{ id: string; items: ChaseItem[] }>(
+    `select id, items from chases where supplier_id = $1 and answered_at is null and closed_reason is null`, [supplierId]);
+  if (!open.length) return;
+  const [cells, subs, reads] = await Promise.all([
+    // The winning reading per line, as the comparison picks it: newest revision first.
+    q<{ line_no: number; raw_status: string; raw_price: number | null }>(
+      `select distinct on (qc.line_no) qc.line_no, qc.raw_status, qc.raw_price
+         from quote_cells qc join submissions s on s.id = qc.submission_id
+        where qc.supplier_id = $1 order by qc.line_no, s.revision desc, s.created_at desc`, [supplierId]),
+    q<{ terms: Record<string, unknown> }>(
+      `select terms from submissions where supplier_id = $1 order by revision, created_at`, [supplierId]),
+    q<{ answers: Array<{ questionNo?: string; answer?: string | null; attachedDocument?: string | null }> }>(
+      `select answers from questionnaire_reads where supplier_id = $1 order by created_at`, [supplierId]),
+  ]);
+  const firm = new Set(cells.filter((c) => c.raw_price !== null && !["omitted", "not_quoted", "illegible", "match_rival", "relative"].includes(c.raw_status)).map((c) => Number(c.line_no)));
+  const declined = new Set(cells.filter((c) => c.raw_status === "not_quoted").map((c) => Number(c.line_no)));
+  // Terms merge across revisions the way the comparison merges them: later
+  // stated values overlay earlier ones, blanks do not erase them.
+  const terms: Record<string, unknown> = {};
+  for (const x of subs) for (const [k, v] of Object.entries(x.terms ?? {})) if (v !== null && v !== undefined && v !== "") terms[k] = v;
+  // Later readings fill in earlier ones, question by question.
+  const answer = new Map<string, { answer: boolean; doc: boolean }>();
+  for (const r of reads) for (const a of r.answers ?? []) {
+    const k = String(a.questionNo);
+    const prev = answer.get(k) ?? { answer: false, doc: false };
+    answer.set(k, { answer: prev.answer || Boolean(a.answer), doc: prev.doc || Boolean(a.attachedDocument) });
+  }
+  const isAnswered = (i: ChaseItem): boolean => {
+    switch (i.kind) {
+      case "price_missing": return (i.lineNos ?? []).length > 0 && i.lineNos!.every((n) => firm.has(n) || declined.has(n));
+      case "price_unreadable":
+      case "price_not_a_price":
+      case "price_derived_unconfirmed": return (i.lineNos ?? []).length > 0 && i.lineNos!.every((n) => firm.has(n));
+      case "price_carried_forward": return false;
+      case "term_not_stated": {
+        const v = i.termKey ? terms[i.termKey] : undefined;
+        return v !== undefined && v !== null && !VAGUE.test(String(v));
+      }
+      case "questionnaire_unanswered": return Boolean(i.questionNo && answer.get(i.questionNo)?.answer);
+      case "questionnaire_no_document": return Boolean(i.questionNo && answer.get(i.questionNo)?.doc);
+      default: return false;
+    }
+  };
+  const done = open.filter((c) => (c.items ?? []).length > 0 && (c.items ?? []).every(isAnswered)).map((c) => c.id);
+  if (done.length) await q(`update chases set answered_at = now() where id = any($1::text[])`, [done]);
 }
 
 
@@ -753,6 +843,83 @@ export async function decideAwardAction(input: { token: string; decision: "appro
   await logEvent({
     userId: String(award.user_id), rfxId: String(award.rfx_id), actor: "approver", kind: "award_decided",
     summary: `${input.name.trim()} ${input.decision === "approved" ? "approved" : input.decision === "rejected" ? "rejected" : "asked for changes to"} the award on ${award.code}${input.note ? `: "${input.note}"` : "."}`,
-    detail: { awardId: award.id, decision: input.decision },
+    detail: { awardId: award.id, decision: input.decision, name: input.name.trim().slice(0, 120) },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Repeat purchases, questionnaire clean-up, withdrawn awards, line notes
+// ---------------------------------------------------------------------------
+
+/**
+ * Start a new draft from an earlier event: same line items, suppliers and
+ * questionnaire, none of the quotes, documents or decisions.
+ */
+export async function duplicateRfxAction(ctx: ActionCtx, rfxRef: string | null | undefined, opts: { title?: string | null; dueDate?: string | null } = {}) {
+  const src = await resolveRfx(ctx.userId, rfxRef);
+  const [lines, suppliers, questions] = await Promise.all([getLines(src.id), getSuppliers(src.id), getQuestions(src.id)]);
+  const rfx = await createRfx(ctx.userId, {
+    title: opts.title?.trim() || `${src.title} (copy)`, eventType: src.event_type, dueDate: opts.dueDate ?? null,
+    buyer: src.buyer, approver: src.approver, termsAsked: src.terms_asked, notes: src.notes,
+    lines: lines.map((l) => ({
+      sku: l.sku, group: l.group, description: l.desc, spec: l.spec, uom: l.uom, packSize: l.pack_size, qty: l.qty, hsn: l.hsn || undefined,
+      baselineInr: l.baseline_inr || null,
+    })),
+    questions: questions.map((x) => ({ no: x.no, question: x.q, mandatory: x.kind === "M", documentRequired: x.doc_required })),
+    // A copy of the demo keeps its fictional suppliers, so it keeps the demo
+    // rule that follow-ups go to the buyer's own address.
+    createdVia: src.created_via === "demo" ? "demo" : ctx.actor === "claude" ? "claude" : "app",
+  });
+  for (const s of suppliers) {
+    const c = (s.contact ?? {}) as { name?: string | null; email?: string | null; phone?: string | null };
+    await addSupplier(rfx.id, { name: s.name, code: s.code, city: s.city, gstin: s.gstin, contactName: c.name ?? null, email: c.email ?? null, phone: c.phone ?? null, channel: s.channel, notes: s.notes });
+  }
+  await log(ctx, rfx.id, "rfx_duplicated",
+    `Created ${rfx.code} "${rfx.title}" as a copy of ${src.code}: ${lines.length} line${lines.length === 1 ? "" : "s"}, ${suppliers.length} supplier${suppliers.length === 1 ? "" : "s"}, ${questions.length} question${questions.length === 1 ? "" : "s"}. No quotes copied.`,
+    { from: src.code });
+  await log(ctx, src.id, "rfx_copied", `Copied to a new draft, ${rfx.code}.`, { to: rfx.code });
+  return { rfx, from: src, lines: lines.length, suppliers: suppliers.length, questions: questions.length };
+}
+
+export async function removeQuestionsAction(ctx: ActionCtx, rfxRef: string | null | undefined, nos: string[], reason: string) {
+  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  if (!reason?.trim()) throw new BadInput("Give a reason for removing the question. It is kept in the audit trail.");
+  const existing = await getQuestions(rfx.id);
+  const gone = existing.filter((x) => nos.map((n) => n.trim().toUpperCase()).includes(x.no.toUpperCase()));
+  if (!gone.length) throw new NotFound(`No question ${nos.join(", ")} on ${rfx.code}. Questions are ${existing.map((x) => x.no).join(", ") || "none"}.`);
+  await q(`delete from rfx_questions where rfx_id = $1 and no = any($2::text[])`, [rfx.id, gone.map((x) => x.no)]);
+  await log(ctx, rfx.id, "questions_removed",
+    `Removed question${gone.length === 1 ? "" : "s"} ${gone.map((x) => `${x.no} ("${x.q}")`).join(", ")} from ${rfx.code}. Qualification is recalculated without ${gone.length === 1 ? "it" : "them"}.`,
+    { reason: reason.trim().slice(0, 2000), before: gone.map((x) => ({ no: x.no, question: x.q, mandatory: x.kind === "M" })) });
+  return { rfx, removed: gone };
+}
+
+/** Pull back an award that is still awaiting approval. Its link stops accepting decisions. */
+export async function withdrawAwardAction(ctx: ActionCtx, rfxRef: string | null | undefined, reason: string, awardId?: string | null) {
+  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  if (!reason?.trim()) throw new BadInput("Give a reason for withdrawing the award. It is kept in the audit trail and shown on the approval link.");
+  const award = await one<Row>(
+    awardId ? `select * from awards where rfx_id = $1 and id = $2` : `select * from awards where rfx_id = $1 and status = 'sent' order by created_at desc limit 1`,
+    awardId ? [rfx.id, awardId] : [rfx.id],
+  );
+  if (!award) throw new NotFound(`${rfx.code} has no award awaiting approval.`);
+  const done = await q(
+    `update awards set status = 'withdrawn', decided_at = now(), decision_note = $2 where id = $1 and status = 'sent' returning id`,
+    [award.id, reason.trim().slice(0, 2000)],
+  );
+  if (!done.length) throw new BadInput(`That award was already ${String(award.status).replace(/_/g, " ")}. Only an award awaiting approval can be withdrawn.`);
+  await log(ctx, rfx.id, "award_withdrawn", `Withdrew the award on ${rfx.code}. The approval link no longer accepts a decision.`, { awardId: award.id, reason: reason.trim().slice(0, 2000) });
+  return { rfx, awardId: String(award.id) };
+}
+
+export async function addLineNoteAction(ctx: ActionCtx, rfxRef: string | null | undefined, lineNo: number, text: string) {
+  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const body = text?.trim();
+  if (!body) throw new BadInput("The note is empty.");
+  const line = (await getLines(rfx.id)).find((l) => l.no === lineNo);
+  if (!line) throw new NotFound(`${rfx.code} has no line ${lineNo}.`);
+  const id = newId("note");
+  await q(`insert into line_notes (id, rfx_id, line_no, text, actor) values ($1,$2,$3,$4,$5)`, [id, rfx.id, lineNo, body.slice(0, 2000), ctx.actor]);
+  await log(ctx, rfx.id, "line_note_added", `Note on line ${lineNo} (${line.desc}): "${body.slice(0, 300)}"`, { lines: [lineNo] });
+  return { rfx, id, line };
 }

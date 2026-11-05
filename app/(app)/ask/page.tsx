@@ -4,8 +4,27 @@ import { listRfxs } from "@/lib/rfx";
 import { SUGGESTIONS } from "@/lib/insights";
 import { AskBox } from "@/components/rfx/ask";
 import { PromptList } from "@/components/prompt-list";
+import { EventSelect } from "@/components/event-select";
 
 export const metadata = { title: "Ask Claude · Bidline" };
+
+const EXAMPLES: Array<[string, string[]]> = [
+  ["Read and check", [
+    "In Bidline, read every unread supplier document on my latest sourcing event and submit the quotes.",
+    "In Bidline, what needs my review before I can compare these quotes?",
+    "In Bidline, explain how the cheapest price on line 1 was worked out, with the supplier's own words.",
+  ]],
+  ["Decide", [
+    "Using only Bidline's figures, which qualified supplier should we award each line to, and why?",
+    "In Bidline, what if we bought one whole category from a single supplier? Price it without saving.",
+    "In Bidline, where are the biggest price differences between suppliers?",
+  ]],
+  ["Follow up and close", [
+    "In Bidline, send a follow-up to each supplier for anything still missing, due in three days.",
+    "In Bidline, draft the award using qualified suppliers only and give me the approval link for the CFO.",
+    "In Bidline, give me a download link for the Excel export.",
+  ]],
+];
 
 export default async function AskPage({ searchParams }: { searchParams: Promise<{ event?: string }> }) {
   const user = await requireUser();
@@ -13,35 +32,35 @@ export default async function AskPage({ searchParams }: { searchParams: Promise<
   const sp = await searchParams;
   const current = events.find((e) => e.id === sp.event) ?? events[0];
   return (
-    <div className="mx-auto grid max-w-4xl gap-6">
+    <div className="mx-auto grid max-w-5xl gap-5">
       <div>
-        <h1 className="text-[28px]">Ask Claude</h1>
-        <p className="mt-1 max-w-2xl text-ink-secondary">
-          Common analysis questions are answered instantly by Bidline from the figures on record. For anything else, Bidline hands the question to your
+        <h1 className="text-[24px] leading-tight">Ask Claude</h1>
+        <p className="mt-1 max-w-[68ch] text-[14px] text-ink-secondary">
+          Common questions are answered instantly by Bidline from the figures on record. For anything else, Bidline hands the question to your
           Claude, which answers with Bidline&apos;s own numbers.
         </p>
       </div>
       {current ? (
-        <>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-ink-secondary">Sourcing event:</span>
-            {events.map((e) => (
-              <Link key={e.id} href={`/ask?event=${e.id}`}
-                title={e.title}
-                className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-3 py-1.5 ${e.id === current.id ? "bg-primary text-white" : "bg-secondary hover:bg-lavender"}`}>
-                <span className="num shrink-0">{e.code}</span> <span className="max-w-[260px] truncate opacity-80">{e.title}</span>
-              </Link>
-            ))}
-          </div>
+        <section className="grid gap-3">
+          <EventSelect events={events.map((e) => ({ id: e.id, code: e.code, title: e.title }))} current={current.id} />
           <AskBox key={current.id} rfxId={current.id} code={current.code} suggestions={SUGGESTIONS} />
-        </>
+        </section>
       ) : (
-        <p className="rounded-xl bg-card p-6 text-sm text-ink-secondary ring-1 ring-border">There are no sourcing events yet. <Link href="/" className="text-primary hover:underline">Start one</Link>, then ask about it here.</p>
+        <p className="rounded-xl bg-card p-5 text-sm text-ink-secondary ring-1 ring-border">There are no sourcing events yet. <Link href="/" className="text-primary hover:underline">Start one</Link>, then ask about it here.</p>
       )}
-      <section className="rounded-xl bg-card p-6 ring-1 ring-border">
-        <h2 className="text-[18px]">Things to ask Claude</h2>
-        <p className="mt-1 mb-4 text-sm text-ink-secondary">Copy one into a Claude chat with Bidline switched on.</p>
-        <PromptList />
+      <section className="rounded-xl bg-card p-4 ring-1 ring-border sm:p-5">
+        <h2 className="text-[16px] font-medium">Examples to ask in Claude</h2>
+        <p className="mt-0.5 text-[13px] text-ink-secondary">
+          These are only starting points. Ask Claude anything about your sourcing events in your own words, in a chat with Bidline switched on.
+        </p>
+        <div className="mt-4 grid gap-4 md:grid-cols-3">
+          {EXAMPLES.map(([group, prompts]) => (
+            <div key={group} className="grid content-start gap-2">
+              <p className="text-[12px] font-medium text-ink-secondary">{group}</p>
+              <PromptList prompts={prompts} />
+            </div>
+          ))}
+        </div>
       </section>
     </div>
   );

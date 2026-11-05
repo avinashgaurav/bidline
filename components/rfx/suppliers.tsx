@@ -9,14 +9,14 @@ const TERM_LABEL: Record<string, string> = {
 
 export function SuppliersTab({ cmp }: { cmp: Comparison }) {
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-4">
       <div className="grid gap-4 xl:grid-cols-2">
         {cmp.suppliers.map((s) => {
           const info = cmp.supplierInfo[s.code];
           const v = info.verdict;
           const st = info.statedTotal as { amount?: number | null; currency?: string | null };
           return (
-            <section key={s.id} className="grid gap-4 rounded-xl bg-card p-6 ring-1 ring-border">
+            <section key={s.id} className="grid gap-4 rounded-xl bg-card p-4 ring-1 sm:p-5 ring-border">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="eyebrow">{s.code} · {s.status}</p>
@@ -59,7 +59,7 @@ export function SuppliersTab({ cmp }: { cmp: Comparison }) {
           );
         })}
       </div>
-      <section className="rounded-xl bg-card p-6 ring-1 ring-border">
+      <section className="rounded-xl bg-card p-4 ring-1 sm:p-5 ring-border">
         <p className="eyebrow mb-3">Add supplier</p>
         <AddSupplierForm rfxId={cmp.rfx.id} />
       </section>

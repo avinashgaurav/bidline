@@ -46,9 +46,12 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
           <div className="rounded-xl bg-card p-6 ring-1 ring-border">
             {decided ? (
               <div className="grid gap-2 text-sm">
-                <p className="eyebrow">Decision</p>
-                <p className="text-[18px] capitalize">{a.status.replace(/_/g, " ")}</p>
-                <p className="text-ink-secondary">by {a.decided_by} on {a.decided_at ? new Date(a.decided_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : ""}</p>
+                <p className="eyebrow">{a.status === "withdrawn" ? "Withdrawn" : "Decision"}</p>
+                <p className="text-[18px] capitalize">{a.status === "withdrawn" ? "The buyer withdrew this award" : a.status.replace(/_/g, " ")}</p>
+                <p className="text-ink-secondary">
+                  {a.status === "withdrawn" ? "No decision is needed. A revised award will come with a new link." : `by ${a.decided_by}`}
+                  {" "}on {a.decided_at ? new Date(a.decided_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : ""}
+                </p>
                 {a.decision_note ? <p>&ldquo;{a.decision_note}&rdquo;</p> : null}
               </div>
             ) : (

@@ -86,12 +86,13 @@ export async function resolveRfx(userId: string, ref?: string | null): Promise<R
 }
 
 export async function listRfxs(userId: string) {
-  return q<RfxRow & { line_count: number; supplier_count: number; responded: number; unread_docs: number }>(
+  return q<RfxRow & { line_count: number; supplier_count: number; responded: number; unread_docs: number; award_status: string | null }>(
     `select r.*,
        (select count(*)::int from rfx_lines l where l.rfx_id = r.id) as line_count,
        (select count(*)::int from suppliers s where s.rfx_id = r.id and s.status <> 'removed') as supplier_count,
        (select count(*)::int from suppliers s where s.rfx_id = r.id and s.status = 'responded') as responded,
-       (select count(*)::int from documents d where d.rfx_id = r.id and d.status = 'unread') as unread_docs
+       (select count(*)::int from documents d where d.rfx_id = r.id and d.status = 'unread') as unread_docs,
+       (select a.status from awards a where a.rfx_id = r.id order by a.created_at desc limit 1) as award_status
      from rfx r where r.user_id = $1 order by r.updated_at desc`,
     [userId],
   );
@@ -123,6 +124,12 @@ export async function getQuestions(rfxId: string): Promise<QuestionSpec[]> {
   return rows.map((r) => ({
     no: String(r.no), kind: String(r.kind), q: String(r.q), doc_required: Boolean(r.doc_required),
   }));
+}
+
+export interface LineNote { id: string; line_no: number; text: string; actor: string; created_at: string }
+
+export async function getLineNotes(rfxId: string): Promise<LineNote[]> {
+  return q<LineNote>(`select id, line_no, text, actor, created_at from line_notes where rfx_id = $1 order by created_at`, [rfxId]);
 }
 
 export async function getSuppliers(rfxId: string, includeRemoved = false): Promise<SupplierRow[]> {
@@ -289,7 +296,9 @@ export async function removeLines(rfxId: string, nos: number[]) {
 
 export async function upsertQuestions(rfxId: string, qs: QuestionInput[]) {
   const existing = await getQuestions(rfxId);
-  let n = existing.length;
+  // Number new questions after the highest one, so a removed Q3 never lets a
+  // new question take an existing number and overwrite it.
+  let n = existing.reduce((m, x) => Math.max(m, Number(x.no.replace(/\D/g, "")) || 0), 0);
   for (const item of qs) {
     n += item.no ? 0 : 1;
     const no = item.no?.trim() || `Q${n}`;

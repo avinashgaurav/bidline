@@ -28,7 +28,7 @@ export async function ChaseTab({ cmp }: { cmp: Comparison }) {
         const g = info.gaps;
         const history = cmp.chases.filter((c) => c.supplier_id === s.id);
         return (
-          <section key={s.id} className="grid gap-4 rounded-xl bg-card p-6 ring-1 ring-border">
+          <section key={s.id} className="grid gap-4 rounded-xl bg-card p-4 ring-1 sm:p-5 ring-border">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
               <h3 className="text-[18px]">{s.code} {s.name}</h3>
               <span className="text-sm text-ink-secondary">{g.gapCount} open item{g.gapCount === 1 ? "" : "s"} · {g.disputeCount} discrepanc{g.disputeCount === 1 ? "y" : "ies"} · {inr(g.totalAtRiskInr)} at stake</span>

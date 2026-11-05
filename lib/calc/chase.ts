@@ -78,7 +78,7 @@ const TERM_LABELS: Record<string, { label: string; why: string }> = {
   },
 };
 
-const VAGUE = /^\s*$|not stated|tbd|to be (advised|confirmed)|as applicable|at actuals|n\/?a$/i;
+export const VAGUE = /^\s*$|not stated|tbd|to be (advised|confirmed)|as applicable|at actuals|n\/?a$/i;
 
 export function gapsForSupplier(opts: {
   vendorId: string;

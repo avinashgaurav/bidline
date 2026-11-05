@@ -1,13 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect, useState, useSyncExternalStore } from "react";
-import { ArrowRight, Check, Copy, ExternalLink, FileSpreadsheet, PencilLine } from "lucide-react";
-import { createRfxUI, loadDemoAction, type FormState } from "@/app/actions";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { ArrowRight, Check, Copy, ExternalLink } from "lucide-react";
 import { Mark } from "@/components/brand";
 import { ClaudeMark } from "@/components/claude-mark";
-import { FormMessage, SubmitButton, fieldClass } from "@/components/form-bits";
-import { OWN_DATA_PROMPT } from "@/components/prompt-list";
 
 const DISMISSED = "bidline:onboarding-dismissed";
 const CLAUDE_GUIDE = "https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp";
@@ -35,17 +32,18 @@ const subscribe = (l: () => void) => {
   return () => listeners.delete(l);
 };
 
-type Stage = "connect" | "start" | null;
+type Stage = "connect" | null;
 
 /**
- * First run: connect Claude, then start a sourcing event. The dashboard stays
- * visible, blurred, behind the card, so the destination is never hidden.
+ * First run: connect Claude. The dashboard stays visible, blurred, behind the
+ * card, so the destination is never hidden. Starting an event is the page's own
+ * question once this closes.
  */
-export function Onboarding({ connected, hasEvents, connectorUrl }: { connected: boolean; hasEvents: boolean; connectorUrl: string }) {
+export function Onboarding({ connected, connectorUrl }: { connected: boolean; connectorUrl: string }) {
   const dismissed = useSyncExternalStore(subscribe, readDismissed, () => true);
   const [opened, setOpened] = useState<Stage>(null);
   const [isConnected, setIsConnected] = useState(connected);
-  const auto: Stage = dismissed ? null : !isConnected ? "connect" : !hasEvents ? "start" : null;
+  const auto: Stage = dismissed || isConnected ? null : "connect";
   const stage = opened ?? auto;
 
   const close = () => {
@@ -56,7 +54,7 @@ export function Onboarding({ connected, hasEvents, connectorUrl }: { connected: 
   return (
     <>
       {!isConnected && !stage ? (
-        <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl bg-night px-5 py-3 text-sm text-on-dark">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl bg-night px-4 py-2.5 text-sm text-on-dark">
           <ClaudeMark className="size-5" />
           <span className="flex-1">Claude is not connected yet. Bidline needs your Claude to read supplier quotes.</span>
           <button onClick={() => setOpened("connect")} className="rounded-full bg-white px-4 py-1.5 text-night hover:bg-fog">Connect Claude</button>
@@ -68,21 +66,17 @@ export function Onboarding({ connected, hasEvents, connectorUrl }: { connected: 
           onKeyDown={(e) => e.key === "Escape" && close()}>
           <div className="flex min-h-full items-center justify-center p-4 sm:p-8">
           <div className="w-full max-w-[560px] rounded-2xl bg-card p-7 shadow-[0_1px_2px_rgba(23,23,33,0.06),0_28px_70px_-16px_rgba(23,23,33,0.35)] sm:p-9 motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:fade-in-0">
-            {stage === "connect" ? (
-              <ConnectStep
-                url={connectorUrl}
-                connected={isConnected}
-                onConnected={() => {
-                  // Stay on this card to show "Claude MCP connected" until Continue.
-                  setOpened("connect");
-                  setIsConnected(true);
-                }}
-                onSkip={close}
-                onContinue={() => (hasEvents ? close() : setOpened("start"))}
-              />
-            ) : (
-              <StartStep onSkip={close} />
-            )}
+            <ConnectStep
+              url={connectorUrl}
+              connected={isConnected}
+              onConnected={() => {
+                // Stay on this card to show "Claude MCP connected" until Continue.
+                setOpened("connect");
+                setIsConnected(true);
+              }}
+              onSkip={close}
+              onContinue={close}
+            />
           </div>
           </div>
         </div>
@@ -211,65 +205,5 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
         {children}
       </div>
     </li>
-  );
-}
-
-function StartStep({ onSkip }: { onSkip: () => void }) {
-  const [demoState, demoAction] = useActionState<FormState, FormData>(async () => loadDemoAction(), {});
-  const [createState, createAction] = useActionState<FormState, FormData>(createRfxUI, {});
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
-      <div>
-        <h2 id="onboarding-title" className="text-[28px] leading-tight">Start your first sourcing event</h2>
-        <p className="mt-2 text-[16px] text-ink-secondary">One purchase with its line items, suppliers and their quotes. Pick a way in; you can add more any time.</p>
-      </div>
-
-      <div className="grid gap-3">
-        <form action={demoAction} className="grid gap-3 rounded-xl bg-lavender p-5">
-          <div className="flex items-start gap-3">
-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-card"><FileSpreadsheet className="size-4.5 text-primary" /></span>
-            <div>
-              <p className="font-medium">Try the demo</p>
-              <p className="mt-0.5 text-sm text-ink-secondary">An IT hardware RFQ: 30 line items and five supplier quotes in Excel, PDF, Word, an email and a phone photo. Then ask Claude to read them.</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 pl-12"><SubmitButton>Load the demo</SubmitButton><FormMessage state={demoState} /></div>
-        </form>
-
-        <div className="grid gap-3 rounded-xl p-5 ring-1 ring-border">
-          <div className="flex items-start gap-3">
-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#F6EEE8]"><ClaudeMark className="size-4.5" /></span>
-            <div className="min-w-0">
-              <p className="font-medium">Describe it to Claude</p>
-              <p className="mt-0.5 text-sm text-ink-secondary">Claude creates the event here. Then upload or attach the supplier quotes.</p>
-              <p className="mt-2 rounded-lg bg-muted p-3 text-[14px]">&ldquo;{OWN_DATA_PROMPT}&rdquo;</p>
-              <button onClick={async () => { await navigator.clipboard.writeText(OWN_DATA_PROMPT); setCopied(true); }} className="mt-2 inline-flex items-center gap-1.5 text-sm text-primary hover:underline">
-                {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}{copied ? "Copied. Paste it in Claude" : "Copy this prompt"}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <form action={createAction} className="grid gap-3 rounded-xl p-5 ring-1 ring-border">
-          <div className="flex items-start gap-3">
-            <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted"><PencilLine className="size-4.5 text-ink-secondary" /></span>
-            <div className="grid flex-1 gap-2">
-              <p className="font-medium">Create it here</p>
-              <div className="flex flex-wrap gap-2">
-                <input name="title" required placeholder="What are you buying?" className={`${fieldClass} min-w-[200px] flex-1`} />
-                <select name="eventType" defaultValue="RFQ" className={`${fieldClass} w-auto`} aria-label="Type">
-                  <option value="RFQ">RFQ</option><option value="RFP">RFP</option><option value="RFI">RFI</option><option value="TENDER">Tender</option>
-                </select>
-                <SubmitButton variant="secondary">Create</SubmitButton>
-              </div>
-              <FormMessage state={createState} />
-            </div>
-          </div>
-        </form>
-      </div>
-
-      <button onClick={onSkip} className="justify-self-start text-sm text-ink-secondary hover:text-foreground">I&apos;ll look around first</button>
-    </div>
   );
 }

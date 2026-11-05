@@ -21,18 +21,18 @@ export default async function ConnectPage() {
     <div className="mx-auto grid max-w-4xl gap-8">
       <div>
         <p className="eyebrow">Connect Claude</p>
-        <h1 className="mt-2 text-[28px]">Claude reads the documents. Bidline keeps the record.</h1>
+        <h1 className="mt-2 text-[24px] leading-tight">Claude reads the documents. Bidline keeps the record.</h1>
         <p className="mt-2 max-w-2xl text-ink-secondary">
           Bidline has no AI inside. It gives your Claude a set of tools over MCP: create a sourcing event, read a supplier&apos;s quote, record the prices,
           compare, edit, send follow-ups and draft the award. Bidline does every calculation, and every change shows in the app straight away.
         </p>
       </div>
       <ConnectCard url={`${base}/mcp/${user.mcp_token}`} connectedAt={user.last_mcp_at} />
-      <section className="rounded-xl bg-card p-6 ring-1 ring-border">
+      <section className="rounded-xl bg-card p-4 ring-1 ring-border sm:p-5">
         <p className="eyebrow">Things to ask Claude</p>
         <div className="mt-3"><PromptList /></div>
       </section>
-      <section className="rounded-xl bg-card p-6 ring-1 ring-border">
+      <section className="rounded-xl bg-card p-4 ring-1 ring-border sm:p-5">
         <p className="eyebrow">Sample supplier files</p>
         <p className="mt-1 text-sm text-ink-secondary">Fictional quotes for the demo event. Upload them to a sourcing event, or attach one to a Claude chat.</p>
         <ul className="mt-3 grid gap-2 sm:grid-cols-2">

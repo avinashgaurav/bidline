@@ -34,7 +34,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <div className="ml-auto min-w-0"><Suspense><SidebarNav connected={connected} compact /></Suspense></div>
         <form action={logoutAction}><button aria-label="Sign out" className="rounded-lg p-2 text-fog hover:text-white"><LogOut className="size-4" /></button></form>
       </header>
-      <main className="min-w-0 px-4 py-6 sm:px-8 sm:py-8">
+      <main className="min-w-0 px-4 py-5 sm:px-6 sm:py-6 xl:px-8">
         <div className="mx-auto max-w-[1320px]">{children}</div>
       </main>
     </div>

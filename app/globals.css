@@ -110,11 +110,11 @@
   }
 }
 
+/* Small section label inside a card: quiet, sentence case. */
 .eyebrow {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: var(--ink-secondary);
 }
 

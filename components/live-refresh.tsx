@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { Tip } from "@/components/tip";
 
 /**
  * Keeps the open screen in step with Claude. Polls the event counter and
@@ -40,9 +41,20 @@ export function LiveRefresh({ url, initial }: { url: string; initial: number }) 
     };
   }, [url, router]);
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs text-ink-secondary" aria-live="polite">
-      <span className={`size-2 rounded-full ${pulse ? "bg-primary animate-ping" : "bg-success"}`} />
-      {pulse ? "Updated just now" : "Live"}
-    </span>
+    <Tip text={pulse ? "Claude or another tab just changed this. The page has refreshed itself." : "This page updates by itself within a few seconds whenever Claude changes something. No need to reload."}>
+      <span
+        tabIndex={0}
+        aria-live="polite"
+        className={`inline-flex h-7 items-center gap-2 rounded-full px-2.5 text-[12px] font-medium transition-colors ${
+          pulse ? "bg-secondary text-primary" : "bg-success/10 text-success"
+        }`}
+      >
+        <span className="relative flex size-2">
+          <span className={`absolute inline-flex size-full rounded-full opacity-60 motion-safe:animate-ping ${pulse ? "bg-primary" : "bg-success [animation-duration:2.4s]"}`} />
+          <span className={`relative inline-flex size-2 rounded-full ${pulse ? "bg-primary" : "bg-success"}`} />
+        </span>
+        {pulse ? "Updated just now" : "Live"}
+      </span>
+    </Tip>
   );
 }

@@ -5,7 +5,7 @@ import { getEmailAccount } from "../mail";
 import { q } from "../db";
 import { logEvent, listEvents, transcriptMarkdown } from "../events";
 import {
-  BadInput, NotFound, getLines, getQuestions, listRfxs, qualityGate, resolveRfx, resolveSupplier,
+  BadInput, NotFound, getLineNotes, getLines, getQuestions, listRfxs, qualityGate, resolveRfx, resolveSupplier,
 } from "../rfx";
 import { documentBytes, getDocument, listDocuments } from "../files";
 import { documentContent, type McpContent } from "../extract/for-claude";
@@ -19,6 +19,7 @@ import {
   recordChaseAction, removeLinesAction, resolveUnmappedAction, saveTextDocumentAction, setFxRateAction,
   setPriorPoAction, submitQuestionnaireAction, submitQuoteAction, submitSecondReadAction,
   updateRfxAction, updateSupplierAction, upsertLinesAction, type ActionCtx,
+  addLineNoteAction, duplicateRfxAction, removeQuestionsAction, withdrawAwardAction,
 } from "../actions";
 import { cheapestPerLine, likeForLike } from "../calc/normalise";
 import {
@@ -115,6 +116,69 @@ export function buildServer(user: User, appUrl: string): McpServer {
     return rfxs.map((r) => `${r.code} | ${r.event_type} | ${r.title} | ${r.status} | ${r.line_count} line items | ${r.responded}/${r.supplier_count} quoted | ${r.unread_docs} unread docs | ${appUrl}/rfx/${r.id}`).join("\n");
   }));
 
+  server.registerTool("list_open_work", {
+    title: "What is waiting, across all events",
+    description: "One list of everything waiting on the buyer across all open sourcing events: unread documents, prices that need review, overdue follow-ups and awards awaiting approval. Use it for 'what should I do today?'.",
+    inputSchema: { user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("list_open_work", args, async () => {
+    const rfxs = (await listRfxs(user.id)).filter((r) => !["awarded", "closed"].includes(r.status)).slice(0, 15);
+    if (!rfxs.length) return "Nothing open. Every sourcing event is awarded or closed.";
+    const overdue = await q<{ rfx_id: string; n: number }>(
+      `select c.rfx_id, count(*)::int as n from chases c join rfx r on r.id = c.rfx_id
+        where r.user_id = $1 and c.answered_at is null and c.closed_reason is null and c.due_at < now() group by c.rfx_id`, [user.id]);
+    const cmps = await Promise.all(rfxs.map((r) => loadComparison(r)));
+    const out: string[] = [];
+    for (const [i, r] of rfxs.entries()) {
+      const cmp = cmps[i];
+      const review = cmp.trust.needsHuman + cmp.unmapped.filter((u) => !u.resolution).length;
+      const late = overdue.find((o) => o.rfx_id === r.id)?.n ?? 0;
+      const items = [
+        r.unread_docs ? `${r.unread_docs} unread document${r.unread_docs === 1 ? "" : "s"} (read them with read_document)` : "",
+        review ? `${review} price${review === 1 ? "" : "s"} need review (list_needs_attention)` : "",
+        late ? `${late} overdue follow-up${late === 1 ? "" : "s"} (get_chase_list)` : "",
+        r.award_status === "sent" ? "award awaiting approval (get_award_status)" : "",
+        !r.line_count ? "no line items yet (upsert_lines)" : "",
+      ].filter(Boolean);
+      out.push(`${r.code} ${r.title} [${r.status}]: ${items.length ? items.join("; ") : "nothing waiting"}. ${appUrl}/rfx/${r.id}`);
+    }
+    return out.join("\n");
+  }, { query: "Checked what is waiting across all events." }));
+
+  server.registerTool("price_history", {
+    title: "Price history for an item",
+    description: "What suppliers quoted for an item across all past sourcing events, matched by SKU or words in the description (e.g. 'docking station'). Landed per-unit prices in INR from Bidline's calculation, lowest first. Use it to sanity-check a new quote or set a budget.",
+    inputSchema: { query: z.string().describe("SKU or words from the item description."), user_request: USER_REQUEST },
+    annotations: ro,
+  }, async (args) => run("price_history", args, async () => {
+    const words = args.query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (!words.length) throw new BadInput("Say which item, by SKU or description.");
+    const rows: string[] = [];
+    const events = (await listRfxs(user.id)).slice(0, 30);
+    const matched = (await Promise.all(events.map(async (r) => ({
+      r,
+      lines: (await getLines(r.id)).filter((l) => {
+        const hay = `${l.sku} ${l.desc}`.toLowerCase();
+        return words.every((w) => hay.includes(w));
+      }),
+    })))).filter((m) => m.lines.length);
+    const cmps = await Promise.all(matched.map((m) => loadComparison(m.r)));
+    for (const [i, { r, lines }] of matched.entries()) {
+      const cmp = cmps[i];
+      for (const l of lines) {
+        const prices = cmp.suppliers
+          .map((sup) => ({ sup, c: cmp.matrix[sup.code]?.[l.no] }))
+          .filter((x) => x.c && x.c.unitInr !== null && (x.c.status === "comparable" || x.c.status === "comparable_with_caveat"))
+          .sort((a, b) => (a.c!.unitInr ?? 0) - (b.c!.unitInr ?? 0));
+        rows.push(
+          `${r.code} (${r.created_at.slice(0, 10)}) L${l.no} ${l.sku} ${l.desc} | ${l.qty} x ${l.uom} | budget ${l.baseline_inr ? inr(l.baseline_inr) : "none"} | ` +
+          (prices.length ? prices.map((x) => `${x.sup.code} ${x.sup.name} ${inr(x.c!.unitInr)}`).join(", ") : "no comparable prices yet"),
+        );
+      }
+    }
+    return rows.length ? `Price history for "${args.query}" (per unit, landed, INR):\n${rows.join("\n")}` : `No line items matching "${args.query}" in any sourcing event.`;
+  }, { query: `Looked up price history for "${args.query}".` }));
+
   server.registerTool("get_rfx", {
     title: "Event details",
     description: "The Event details, every line item (item, specification, unit, pack size, quantity), the suppliers and their status, the questionnaire and any unclear line items.",
@@ -124,6 +188,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
     const rfx = await resolveRfx(user.id, args.rfx);
     const cmp = await loadComparison(rfx);
     const gate = qualityGate(cmp.lines);
+    const notes = await getLineNotes(rfx.id);
     const terms = Object.entries(rfx.terms_asked ?? {}).map(([k, v]) => `- ${k}: ${v}`);
     return [
       rfxHeader(cmp, appUrl),
@@ -138,6 +203,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
       "",
       questionCatalogText(cmp.questions),
       gate.length ? "\nUNCLEAR LINE ITEMS\n" + gate.map((g) => `L${g.lineNo}: ${g.issue}`).join("\n") : "",
+      notes.length ? "\nLINE NOTES\n" + notes.map((n) => `L${n.line_no} (${n.actor === "claude" ? "Claude" : "buyer"}, ${n.created_at.slice(0, 10)}): ${n.text}`).join("\n") : "",
     ].filter((x) => x !== "").join("\n");
   }, { query: "Viewed the Event details.", rfx: args.rfx ?? "" }));
 
@@ -267,6 +333,36 @@ export function buildServer(user: User, appUrl: string): McpServer {
   }, async (args) => run("add_questions", args, async (ctx) => {
     const r = await addQuestionsAction(ctx, args.rfx, args.questions);
     return `Saved ${args.questions.length} question${args.questions.length === 1 ? "" : "s"} on ${r.rfx.code}.\n${questionCatalogText(await getQuestions(r.rfx.id))}`;
+  }));
+
+  server.registerTool("remove_questions", {
+    title: "Remove questionnaire questions",
+    description: "Delete questionnaire questions by number (e.g. Q3), with a reason kept in the audit trail. Qualification is recalculated without them.",
+    inputSchema: { rfx: RFX, questionNos: z.array(z.string()).min(1).describe("Question numbers, e.g. [\"Q3\"]."), reason: z.string(), user_request: USER_REQUEST },
+    annotations: { ...rw, destructiveHint: true },
+  }, async (args) => run("remove_questions", args, async (ctx) => {
+    const r = await removeQuestionsAction(ctx, args.rfx, args.questionNos, args.reason);
+    return `Removed ${r.removed.map((x) => x.no).join(", ")} from ${r.rfx.code}.\n${questionCatalogText(await getQuestions(r.rfx.id))}`;
+  }));
+
+  server.registerTool("duplicate_rfx", {
+    title: "Duplicate a sourcing event",
+    description: "Start a new draft from an earlier event for a repeat purchase: copies line items, budgets, suppliers and the questionnaire. No quotes, documents, follow-ups, awards, exchange rates or unit rules are copied; set rates again with set_fx_rate if needed.",
+    inputSchema: { rfx: RFX, title: z.string().optional().describe("Title for the copy. Default: the original title with (copy)."), dueDate: z.string().optional().describe("YYYY-MM-DD"), user_request: USER_REQUEST },
+    annotations: rw,
+  }, async (args) => run("duplicate_rfx", args, async (ctx) => {
+    const r = await duplicateRfxAction(ctx, args.rfx, { title: args.title, dueDate: args.dueDate });
+    return `Created ${r.rfx.code} "${r.rfx.title}" from ${r.from.code}: ${r.lines} line items, ${r.suppliers} suppliers, ${r.questions} questions. It is a draft with no quotes.\nOpen in Bidline: ${appUrl}/rfx/${r.rfx.id}`;
+  }));
+
+  server.registerTool("add_line_note", {
+    title: "Add a note to a line item",
+    description: "Attach a note to one line item, e.g. 'confirm the warranty with Vector before award'. Notes are shown on the Line items step and kept in the audit trail. They never change a price.",
+    inputSchema: { rfx: RFX, lineNo: z.number().int().positive(), note: z.string(), user_request: USER_REQUEST },
+    annotations: rw,
+  }, async (args) => run("add_line_note", args, async (ctx) => {
+    const r = await addLineNoteAction(ctx, args.rfx, args.lineNo, args.note);
+    return `Noted on ${r.rfx.code} line ${args.lineNo} (${r.line.desc}).`;
   }));
 
   server.registerTool("issue_rfx", {
@@ -884,6 +980,16 @@ export function buildServer(user: User, appUrl: string): McpServer {
       `Approval link for the approver (no login needed): ${appUrl}/share/${r.token}`,
       `In the app: ${appUrl}/rfx/${r.rfx.id}?tab=award`,
     ].filter(Boolean).join("\n");
+  }));
+
+  server.registerTool("withdraw_award", {
+    title: "Withdraw an award",
+    description: "Pull back an award that is still awaiting approval, with a reason. Its approval link stops accepting a decision and shows that it was withdrawn. Draft a new award afterwards with create_award.",
+    inputSchema: { rfx: RFX, reason: z.string(), awardId: z.string().optional().describe("Default: the latest award awaiting approval."), user_request: USER_REQUEST },
+    annotations: { ...rw, destructiveHint: true },
+  }, async (args) => run("withdraw_award", args, async (ctx) => {
+    const r = await withdrawAwardAction(ctx, args.rfx, args.reason, args.awardId);
+    return `Withdrew the award on ${r.rfx.code}. The approval link no longer accepts a decision. Draft a new one with create_award when ready.`;
   }));
 
   server.registerTool("get_award_status", {
