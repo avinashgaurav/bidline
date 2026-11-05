@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { json, newId, one, q, type Row } from "./db";
 import { logEvent, type Actor } from "./events";
 import {
-  BadInput, NotFound, addSupplier, createRfx, getLines, getSuppliers, qualityGate, removeLines,
+  BadInput, NotFound, addSupplier, createRfx, getLines, getQuestions, getSuppliers, qualityGate, removeLines,
   resolveRfx, resolveSupplier, setAssumption, upsertLines, upsertQuestions,
   type LineInput, type QuestionInput, type RfxRow, type SupplierInput, type SupplierRow,
 } from "./rfx";
@@ -101,11 +101,25 @@ export async function upsertLinesAction(ctx: ActionCtx, rfxRef: string | null | 
   const before = await getLines(rfx.id);
   const touched = await upsertLines(rfx.id, lines);
   const after = await getLines(rfx.id);
+  // Say exactly what changed, field by field, so the audit trail needs no diffing.
+  const FIELDS: Array<[keyof (typeof after)[number], string]> = [
+    ["sku", "SKU"], ["desc", "description"], ["uom", "unit"], ["pack_size", "pack size"], ["qty", "quantity"], ["baseline_inr", "budget per unit"],
+  ];
+  const changes = touched.map((no) => {
+    const b = before.find((l) => l.no === no);
+    const a = after.find((l) => l.no === no);
+    if (!a) return null;
+    if (!b) return `added line ${no} (${a.desc}, ${a.qty} ${a.uom})`;
+    const diff = FIELDS.filter(([k]) => String(b[k] ?? "") !== String(a[k] ?? "")).map(([k, label]) => `${label} ${b[k] || "none"} -> ${a[k] || "none"}`);
+    return diff.length ? `line ${no}: ${diff.join(", ")}` : null;
+  }).filter(Boolean);
+  if (!changes.length) return { rfx, touched, gate: qualityGate(after) };
+  const pick = (l: (typeof after)[number]) => ({ no: l.no, sku: l.sku, desc: l.desc, uom: l.uom, packSize: l.pack_size, qty: l.qty, budgetInr: l.baseline_inr });
   await log(ctx, rfx.id, "lines_changed",
-    `Added or changed line${touched.length === 1 ? "" : "s"} ${touched.join(", ")} on ${rfx.code}.`,
+    `${changes.join("; ").replace(/^\w/, (c) => c.toUpperCase())} on ${rfx.code}.`,
     {
-      before: before.filter((l) => touched.includes(l.no)).map((l) => ({ no: l.no, desc: l.desc, uom: l.uom, qty: l.qty })),
-      after: after.filter((l) => touched.includes(l.no)).map((l) => ({ no: l.no, desc: l.desc, uom: l.uom, qty: l.qty })),
+      before: before.filter((l) => touched.includes(l.no)).map(pick),
+      after: after.filter((l) => touched.includes(l.no)).map(pick),
     });
   return { rfx, touched, gate: qualityGate(after) };
 }
@@ -403,7 +417,14 @@ export async function submitQuoteAction(ctx: ActionCtx, input: {
                kind = case when kind = 'other' then 'quotation' else kind end where id = $1`, [doc.id, supplier.id]);
   }
   await q(`update suppliers set status = 'responded' where id = $1 and status in ('invited','declined')`, [supplier.id]);
-  await q(`update chases set answered_at = now() where supplier_id = $1 and answered_at is null`, [supplier.id]);
+  // A follow-up is answered only when this quote covers every line it asked
+  // about. One that asked only about terms is answered by any new quote.
+  const openChases = await q<{ id: string; items: Array<{ lineNos?: number[] }> }>(
+    `select id, items from chases where supplier_id = $1 and answered_at is null`, [supplier.id]);
+  const answered = openChases
+    .filter((c) => (c.items ?? []).flatMap((i) => i.lineNos ?? []).every((n) => seenLines.has(n)))
+    .map((c) => c.id);
+  if (answered.length) await q(`update chases set answered_at = now() where id = any($1::text[])`, [answered]);
   await q(`update rfx set status = 'evaluating' where id = $1 and status in ('draft','issued')`, [rfx.id]);
 
   await log(ctx, rfx.id, "quote_read",
@@ -753,6 +774,81 @@ export async function decideAwardAction(input: { token: string; decision: "appro
   await logEvent({
     userId: String(award.user_id), rfxId: String(award.rfx_id), actor: "approver", kind: "award_decided",
     summary: `${input.name.trim()} ${input.decision === "approved" ? "approved" : input.decision === "rejected" ? "rejected" : "asked for changes to"} the award on ${award.code}${input.note ? `: "${input.note}"` : "."}`,
-    detail: { awardId: award.id, decision: input.decision },
+    detail: { awardId: award.id, decision: input.decision, name: input.name.trim().slice(0, 120) },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Repeat purchases, questionnaire clean-up, withdrawn awards, line notes
+// ---------------------------------------------------------------------------
+
+/**
+ * Start a new draft from an earlier event: same line items, suppliers and
+ * questionnaire, none of the quotes, documents or decisions.
+ */
+export async function duplicateRfxAction(ctx: ActionCtx, rfxRef: string | null | undefined, opts: { title?: string | null; dueDate?: string | null } = {}) {
+  const src = await resolveRfx(ctx.userId, rfxRef);
+  const [lines, suppliers, questions] = await Promise.all([getLines(src.id), getSuppliers(src.id), getQuestions(src.id)]);
+  const rfx = await createRfx(ctx.userId, {
+    title: opts.title?.trim() || `${src.title} (copy)`, eventType: src.event_type, dueDate: opts.dueDate ?? null,
+    buyer: src.buyer, approver: src.approver, termsAsked: src.terms_asked, notes: src.notes,
+    lines: lines.map((l) => ({
+      sku: l.sku, group: l.group, description: l.desc, spec: l.spec, uom: l.uom, packSize: l.pack_size, qty: l.qty, hsn: l.hsn || undefined,
+      baselineInr: l.baseline_inr || null,
+    })),
+    questions: questions.map((x) => ({ no: x.no, question: x.q, mandatory: x.kind === "M", documentRequired: x.doc_required })),
+    createdVia: ctx.actor === "claude" ? "claude" : "app",
+  });
+  for (const s of suppliers) {
+    const c = (s.contact ?? {}) as { name?: string | null; email?: string | null; phone?: string | null };
+    await addSupplier(rfx.id, { name: s.name, code: s.code, city: s.city, gstin: s.gstin, contactName: c.name ?? null, email: c.email ?? null, phone: c.phone ?? null, channel: s.channel, notes: s.notes });
+  }
+  await log(ctx, rfx.id, "rfx_duplicated",
+    `Created ${rfx.code} "${rfx.title}" as a copy of ${src.code}: ${lines.length} line${lines.length === 1 ? "" : "s"}, ${suppliers.length} supplier${suppliers.length === 1 ? "" : "s"}, ${questions.length} question${questions.length === 1 ? "" : "s"}. No quotes copied.`,
+    { from: src.code });
+  await log(ctx, src.id, "rfx_copied", `Copied to a new draft, ${rfx.code}.`, { to: rfx.code });
+  return { rfx, from: src, lines: lines.length, suppliers: suppliers.length, questions: questions.length };
+}
+
+export async function removeQuestionsAction(ctx: ActionCtx, rfxRef: string | null | undefined, nos: string[], reason: string) {
+  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  if (!reason?.trim()) throw new BadInput("Give a reason for removing the question. It is kept in the audit trail.");
+  const existing = await getQuestions(rfx.id);
+  const gone = existing.filter((x) => nos.map((n) => n.trim().toUpperCase()).includes(x.no.toUpperCase()));
+  if (!gone.length) throw new NotFound(`No question ${nos.join(", ")} on ${rfx.code}. Questions are ${existing.map((x) => x.no).join(", ") || "none"}.`);
+  await q(`delete from rfx_questions where rfx_id = $1 and no = any($2::text[])`, [rfx.id, gone.map((x) => x.no)]);
+  await log(ctx, rfx.id, "questions_removed",
+    `Removed question${gone.length === 1 ? "" : "s"} ${gone.map((x) => `${x.no} ("${x.q}")`).join(", ")} from ${rfx.code}. Qualification is recalculated without ${gone.length === 1 ? "it" : "them"}.`,
+    { reason: reason.trim(), before: gone.map((x) => ({ no: x.no, question: x.q, mandatory: x.kind === "M" })) });
+  return { rfx, removed: gone };
+}
+
+/** Pull back an award that is still awaiting approval. Its link stops accepting decisions. */
+export async function withdrawAwardAction(ctx: ActionCtx, rfxRef: string | null | undefined, reason: string, awardId?: string | null) {
+  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  if (!reason?.trim()) throw new BadInput("Give a reason for withdrawing the award. It is kept in the audit trail and shown on the approval link.");
+  const award = await one<Row>(
+    awardId ? `select * from awards where rfx_id = $1 and id = $2` : `select * from awards where rfx_id = $1 and status = 'sent' order by created_at desc limit 1`,
+    awardId ? [rfx.id, awardId] : [rfx.id],
+  );
+  if (!award) throw new NotFound(`${rfx.code} has no award awaiting approval.`);
+  const done = await q(
+    `update awards set status = 'withdrawn', decided_at = now(), decision_note = $2 where id = $1 and status = 'sent' returning id`,
+    [award.id, reason.trim().slice(0, 2000)],
+  );
+  if (!done.length) throw new BadInput(`That award was already ${String(award.status).replace(/_/g, " ")}. Only an award awaiting approval can be withdrawn.`);
+  await log(ctx, rfx.id, "award_withdrawn", `Withdrew the award on ${rfx.code}. The approval link no longer accepts a decision.`, { awardId: award.id, reason: reason.trim() });
+  return { rfx, awardId: String(award.id) };
+}
+
+export async function addLineNoteAction(ctx: ActionCtx, rfxRef: string | null | undefined, lineNo: number, text: string) {
+  const rfx = await resolveRfx(ctx.userId, rfxRef);
+  const body = text?.trim();
+  if (!body) throw new BadInput("The note is empty.");
+  const line = (await getLines(rfx.id)).find((l) => l.no === lineNo);
+  if (!line) throw new NotFound(`${rfx.code} has no line ${lineNo}.`);
+  const id = newId("note");
+  await q(`insert into line_notes (id, rfx_id, line_no, text, actor) values ($1,$2,$3,$4,$5)`, [id, rfx.id, lineNo, body.slice(0, 2000), ctx.actor]);
+  await log(ctx, rfx.id, "line_note_added", `Note on line ${lineNo} (${line.desc}): "${body.slice(0, 300)}"`, { lines: [lineNo] });
+  return { rfx, id, line };
 }

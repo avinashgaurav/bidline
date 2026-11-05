@@ -5,7 +5,7 @@ import { getEmailAccount } from "../mail";
 import { q } from "../db";
 import { logEvent, listEvents, transcriptMarkdown } from "../events";
 import {
-  BadInput, NotFound, getLines, getQuestions, listRfxs, qualityGate, resolveRfx, resolveSupplier,
+  BadInput, NotFound, getLineNotes, getLines, getQuestions, listRfxs, qualityGate, resolveRfx, resolveSupplier,
 } from "../rfx";
 import { documentBytes, getDocument, listDocuments } from "../files";
 import { documentContent, type McpContent } from "../extract/for-claude";
@@ -19,6 +19,7 @@ import {
   recordChaseAction, removeLinesAction, resolveUnmappedAction, saveTextDocumentAction, setFxRateAction,
   setPriorPoAction, submitQuestionnaireAction, submitQuoteAction, submitSecondReadAction,
   updateRfxAction, updateSupplierAction, upsertLinesAction, type ActionCtx,
+  addLineNoteAction, duplicateRfxAction, removeQuestionsAction, withdrawAwardAction,
 } from "../actions";
 import { cheapestPerLine, likeForLike } from "../calc/normalise";
 import {
@@ -124,6 +125,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
     const rfx = await resolveRfx(user.id, args.rfx);
     const cmp = await loadComparison(rfx);
     const gate = qualityGate(cmp.lines);
+    const notes = await getLineNotes(rfx.id);
     const terms = Object.entries(rfx.terms_asked ?? {}).map(([k, v]) => `- ${k}: ${v}`);
     return [
       rfxHeader(cmp, appUrl),
@@ -138,6 +140,7 @@ export function buildServer(user: User, appUrl: string): McpServer {
       "",
       questionCatalogText(cmp.questions),
       gate.length ? "\nUNCLEAR LINE ITEMS\n" + gate.map((g) => `L${g.lineNo}: ${g.issue}`).join("\n") : "",
+      notes.length ? "\nLINE NOTES\n" + notes.map((n) => `L${n.line_no} (${n.actor === "claude" ? "Claude" : "buyer"}, ${n.created_at.slice(0, 10)}): ${n.text}`).join("\n") : "",
     ].filter((x) => x !== "").join("\n");
   }, { query: "Viewed the Event details.", rfx: args.rfx ?? "" }));
 
@@ -267,6 +270,36 @@ export function buildServer(user: User, appUrl: string): McpServer {
   }, async (args) => run("add_questions", args, async (ctx) => {
     const r = await addQuestionsAction(ctx, args.rfx, args.questions);
     return `Saved ${args.questions.length} question${args.questions.length === 1 ? "" : "s"} on ${r.rfx.code}.\n${questionCatalogText(await getQuestions(r.rfx.id))}`;
+  }));
+
+  server.registerTool("remove_questions", {
+    title: "Remove questionnaire questions",
+    description: "Delete questionnaire questions by number (e.g. Q3), with a reason kept in the audit trail. Qualification is recalculated without them.",
+    inputSchema: { rfx: RFX, questionNos: z.array(z.string()).min(1).describe("Question numbers, e.g. [\"Q3\"]."), reason: z.string(), user_request: USER_REQUEST },
+    annotations: { ...rw, destructiveHint: true },
+  }, async (args) => run("remove_questions", args, async (ctx) => {
+    const r = await removeQuestionsAction(ctx, args.rfx, args.questionNos, args.reason);
+    return `Removed ${r.removed.map((x) => x.no).join(", ")} from ${r.rfx.code}.\n${questionCatalogText(await getQuestions(r.rfx.id))}`;
+  }));
+
+  server.registerTool("duplicate_rfx", {
+    title: "Duplicate a sourcing event",
+    description: "Start a new draft from an earlier event for a repeat purchase: copies line items, budgets, suppliers and the questionnaire. No quotes, documents, follow-ups or awards are copied.",
+    inputSchema: { rfx: RFX, title: z.string().optional().describe("Title for the copy. Default: the original title with (copy)."), dueDate: z.string().optional().describe("YYYY-MM-DD"), user_request: USER_REQUEST },
+    annotations: rw,
+  }, async (args) => run("duplicate_rfx", args, async (ctx) => {
+    const r = await duplicateRfxAction(ctx, args.rfx, { title: args.title, dueDate: args.dueDate });
+    return `Created ${r.rfx.code} "${r.rfx.title}" from ${r.from.code}: ${r.lines} line items, ${r.suppliers} suppliers, ${r.questions} questions. It is a draft with no quotes.\nOpen in Bidline: ${appUrl}/rfx/${r.rfx.id}`;
+  }));
+
+  server.registerTool("add_line_note", {
+    title: "Add a note to a line item",
+    description: "Attach a note to one line item, e.g. 'confirm the warranty with Vector before award'. Notes are shown on the Line items step and kept in the audit trail. They never change a price.",
+    inputSchema: { rfx: RFX, lineNo: z.number().int().positive(), note: z.string(), user_request: USER_REQUEST },
+    annotations: rw,
+  }, async (args) => run("add_line_note", args, async (ctx) => {
+    const r = await addLineNoteAction(ctx, args.rfx, args.lineNo, args.note);
+    return `Noted on ${r.rfx.code} line ${args.lineNo} (${r.line.desc}).`;
   }));
 
   server.registerTool("issue_rfx", {
@@ -884,6 +917,16 @@ export function buildServer(user: User, appUrl: string): McpServer {
       `Approval link for the approver (no login needed): ${appUrl}/share/${r.token}`,
       `In the app: ${appUrl}/rfx/${r.rfx.id}?tab=award`,
     ].filter(Boolean).join("\n");
+  }));
+
+  server.registerTool("withdraw_award", {
+    title: "Withdraw an award",
+    description: "Pull back an award that is still awaiting approval, with a reason. Its approval link stops accepting a decision and shows that it was withdrawn. Draft a new award afterwards with create_award.",
+    inputSchema: { rfx: RFX, reason: z.string(), awardId: z.string().optional().describe("Default: the latest award awaiting approval."), user_request: USER_REQUEST },
+    annotations: { ...rw, destructiveHint: true },
+  }, async (args) => run("withdraw_award", args, async (ctx) => {
+    const r = await withdrawAwardAction(ctx, args.rfx, args.reason, args.awardId);
+    return `Withdrew the award on ${r.rfx.code}. The approval link no longer accepts a decision. Draft a new one with create_award when ready.`;
   }));
 
   server.registerTool("get_award_status", {

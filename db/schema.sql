@@ -301,3 +301,25 @@ alter table chases add column if not exists to_email text;
 alter table chases add column if not exists sent_via text not null default 'recorded';
 alter table chases add column if not exists message_id text;
 alter table chases add column if not exists send_error text;
+
+-- Failed sign-ins, for throttling password guessing. Rows older than a day are
+-- pruned on the next failure.
+create table if not exists login_failures (
+  email text not null,
+  ip    text not null,
+  at    timestamptz not null default now()
+);
+create index if not exists login_failures_email_idx on login_failures(email, at);
+create index if not exists login_failures_ip_idx on login_failures(ip, at);
+
+-- Notes on a line item ("confirm warranty with Vector"), from the app or Claude.
+-- Append-only, like the audit trail.
+create table if not exists line_notes (
+  id         text primary key,
+  rfx_id     text not null references rfx(id) on delete cascade,
+  line_no    integer not null,
+  text       text not null,
+  actor      text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists line_notes_rfx_idx on line_notes(rfx_id, line_no);

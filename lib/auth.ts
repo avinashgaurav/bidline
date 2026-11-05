@@ -137,6 +137,32 @@ export async function checkLogin(email: string, password: string): Promise<User 
 }
 
 // ---------------------------------------------------------------------------
+// Sign-in throttle: 5 failures per email or 30 per address in 15 minutes.
+// ---------------------------------------------------------------------------
+
+const WINDOW = "15 minutes";
+const MAX_PER_EMAIL = 5;
+const MAX_PER_IP = 30;
+
+export async function loginBlocked(email: string, ip: string): Promise<boolean> {
+  const row = await one<{ by_email: number; by_ip: number }>(
+    `select count(*) filter (where email = $1)::int as by_email, count(*) filter (where ip = $2)::int as by_ip
+       from login_failures where at > now() - interval '${WINDOW}' and (email = $1 or ip = $2)`,
+    [normaliseEmail(email), ip],
+  );
+  return (row?.by_email ?? 0) >= MAX_PER_EMAIL || (row?.by_ip ?? 0) >= MAX_PER_IP;
+}
+
+export async function recordLoginFailure(email: string, ip: string) {
+  await q("insert into login_failures (email, ip) values ($1, $2)", [normaliseEmail(email), ip]);
+  await q("delete from login_failures where at < now() - interval '1 day'");
+}
+
+export async function clearLoginFailures(email: string) {
+  await q("delete from login_failures where email = $1", [normaliseEmail(email)]);
+}
+
+// ---------------------------------------------------------------------------
 // Signed download links: let Claude hand the buyer an export without a login.
 // The link names one event and one file type and expires.
 // ---------------------------------------------------------------------------

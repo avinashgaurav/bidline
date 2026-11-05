@@ -1,4 +1,5 @@
 import type { Comparison } from "@/lib/comparison";
+import { RemoveQuestion } from "./edit-extras";
 
 const STATUS: Record<string, { label: string; cls: string }> = {
   supported: { label: "Pass", cls: "bg-success/10 text-success" },
@@ -37,7 +38,10 @@ export function QuestionnaireTab({ cmp }: { cmp: Comparison }) {
             {cmp.questions.map((q) => (
               <tr key={q.no} className="border-t border-border align-top">
                 <td className="px-4 py-3">
-                  <span className="text-xs text-ink-secondary">{q.no} · {q.kind === "M" ? "mandatory" : "desirable"}{q.doc_required ? " · evidence required" : ""}</span>
+                  <span className="flex items-center justify-between gap-2 text-xs text-ink-secondary">
+                    <span>{q.no} · {q.kind === "M" ? "mandatory" : "desirable"}{q.doc_required ? " · evidence required" : ""}</span>
+                    <RemoveQuestion rfxId={cmp.rfx.id} no={q.no} question={q.q} />
+                  </span>
                   <p>{q.q}</p>
                 </td>
                 {cmp.suppliers.map((s) => {

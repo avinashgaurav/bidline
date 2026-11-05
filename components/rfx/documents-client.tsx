@@ -47,17 +47,15 @@ export function Uploader({ rfxId, suppliers }: { rfxId: string; suppliers: Array
       onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
       onDragLeave={() => setDrag(false)}
       onDrop={(e) => { e.preventDefault(); setDrag(false); send(e.dataTransfer.files); }}
-      className={`grid gap-4 rounded-xl border-2 border-dashed p-6 ${drag ? "border-primary bg-lavender" : "border-input bg-card"}`}
+      className={`grid gap-3 rounded-xl border-2 border-dashed px-4 py-3.5 transition-colors ${drag ? "border-primary bg-lavender" : "border-input bg-card"}`}
     >
-      <div className="flex flex-wrap items-center gap-4">
-        <span className="grid size-11 place-items-center rounded-full bg-secondary text-primary"><Upload className="size-5" /></span>
-        <div className="min-w-0 flex-1">
-          <p className="font-medium">Drop supplier documents here</p>
-          <p className="text-sm text-ink-secondary">PDF, Excel, Word, email (.eml), CSV, text or photos. Up to 4 MB each. Files stay unread until you ask Claude to read them.</p>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-primary"><Upload className="size-4" /></span>
+        <div className="min-w-[220px] flex-1">
+          <p className="text-[15px] font-medium">Drop supplier documents here</p>
+          <p className="text-[13px] text-ink-secondary">PDF, Excel, Word, email (.eml), CSV, text or photos, up to 4 MB each. They stay unread until you ask Claude to read them.</p>
         </div>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <select value={supplier} onChange={(e) => setSupplier(e.target.value)} className={`${fieldClass} w-auto`} aria-label="Which supplier sent these">
+        <select value={supplier} onChange={(e) => setSupplier(e.target.value)} className={`${fieldClass} w-auto max-w-[260px]`} aria-label="Which supplier sent these">
           <option value="">Supplier: detect from file name</option>
           {suppliers.map((s) => <option key={s.code} value={s.code}>{s.code} {s.name}</option>)}
         </select>

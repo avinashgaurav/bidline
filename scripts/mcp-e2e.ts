@@ -38,7 +38,9 @@ async function main() {
   await client.connect(new StreamableHTTPClientTransport(new URL(`${BASE}/mcp/${user.mcp_token}`)));
 
   const call = async (name: string, args: Record<string, unknown>, expectError = false): Promise<string> => {
-    const res = (await client.callTool({ name, arguments: { user_request: `e2e: ${name}`, ...args } })) as ToolOut;
+    // Local runs reach the database over the internet (~300 ms a query), so allow
+    // slow tools more than the SDK's 60 s default.
+    const res = (await client.callTool({ name, arguments: { user_request: `e2e: ${name}`, ...args } }, undefined, { timeout: 300_000 })) as ToolOut;
     const text = res.content.map((c) => c.text ?? `[${c.type}]`).join("\n");
     check(`${name}${expectError ? " (expected refusal)" : ""}`, Boolean(res.isError) === expectError, res.isError && !expectError ? text.slice(0, 300) : "");
     return text;
@@ -173,6 +175,21 @@ async function main() {
     check("an export link only works for the file it was made for", tampered?.status === 401);
     const md = await call("get_activity", { rfx: code, format: "markdown" });
     check("transcript records what was asked", /e2e: create_rfx/.test(md) && /Tool `correct_price`/.test(md));
+
+    // Edits added later: withdraw an award, remove a question, notes, repeat purchases.
+    await call("withdraw_award", { rfx: code, reason: "e2e: revised quote expected" });
+    const shareAfter = await fetch(`${BASE}/share/${token}`).then((r) => r.text());
+    check("a withdrawn award's link says so", /withdrew this award/.test(shareAfter));
+    await call("withdraw_award", { rfx: code, reason: "again" }, true);
+    const qno = catalog.questionnaire.at(-1)!.no;
+    const removed = await call("remove_questions", { rfx: code, questionNos: [qno], reason: "e2e: not needed" });
+    check("remove_questions drops the question", removed.includes("QUESTIONNAIRE") && !removed.includes(`\n${qno} [`));
+    await call("add_line_note", { rfx: code, lineNo: 1, note: "e2e: confirm warranty" });
+    check("get_rfx shows line notes", /LINE NOTES[\s\S]*e2e: confirm warranty/.test(await call("get_rfx", { rfx: code })));
+    const copy = await call("duplicate_rfx", { rfx: code, title: "e2e repeat purchase" });
+    const copyCode = /Created (RFX-\d{4}-\d{4})/.exec(copy)?.[1];
+    const copied = copyCode ? await call("get_comparison", { rfx: copyCode }) : "";
+    check("duplicate_rfx copies lines and suppliers but no quotes", Boolean(copyCode) && /30 line items/.test(copy) && /5 suppliers/.test(copy) && !/₹3/.test(copied.split("\n").slice(0, 3).join(" ")));
 
     await call("get_line", { rfx: "RFX-0000-0000", lineNo: 1 }, true);
     const bad = await fetch(`${BASE}/mcp/bl_not_a_real_token`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });

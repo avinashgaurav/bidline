@@ -2,7 +2,10 @@
 
 import { redirect } from "next/navigation";
 import { refresh } from "next/cache";
-import { checkLogin, createUser, endSession, newMcpToken, normaliseEmail, requireUser, startSession } from "@/lib/auth";
+import { headers } from "next/headers";
+import {
+  checkLogin, clearLoginFailures, createUser, endSession, loginBlocked, newMcpToken, normaliseEmail, recordLoginFailure, requireUser, startSession,
+} from "@/lib/auth";
 import { one, q } from "@/lib/db";
 import { logEvent } from "@/lib/events";
 import { BadInput, NotFound } from "@/lib/rfx";
@@ -49,8 +52,14 @@ export async function loginAction(_: FormState, f: FormData): Promise<FormState>
   const email = str(f, "email");
   const password = String(f.get("password") ?? "");
   if (!email || !password) return { error: "Enter your email and password." };
+  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  if (await loginBlocked(email, ip)) return { error: "Too many failed attempts. Wait 15 minutes and try again." };
   const user = await checkLogin(email, password);
-  if (!user) return { error: "Incorrect email or password." };
+  if (!user) {
+    await recordLoginFailure(email, ip);
+    return { error: "Incorrect email or password." };
+  }
+  await clearLoginFailures(email);
   await startSession(user.id);
   await logEvent({ userId: user.id, actor: "user", kind: "login", summary: `Signed in as ${user.email}.` });
   redirect("/");
@@ -93,7 +102,7 @@ export async function loadDemoAction(): Promise<FormState> {
     console.error(e);
     return { error: `Could not load the demo event: ${(e as Error).message}` };
   }
-  redirect(`/rfx/${rfxId}?tab=documents`);
+  redirect(`/rfx/${rfxId}?tab=overview`);
 }
 
 
@@ -339,4 +348,32 @@ export async function askBidline(rfxId: string, question: string) {
   const result = answer(await loadComparison(rfx), question);
   await logEvent({ userId: user.id, rfxId: rfx.id, actor: "user", kind: "query", userRequest: question, summary: result ? `Asked in the app: ${result.title}.` : "Asked in the app; passed to Claude." });
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Repeat purchases, questionnaire clean-up, withdrawn awards, line notes
+// ---------------------------------------------------------------------------
+
+export async function duplicateRfxUI(rfxId: string, _: FormState, f: FormData): Promise<FormState> {
+  let id = "";
+  const res = await act(async (ctx) => {
+    const r = await A.duplicateRfxAction(ctx, rfxId, { title: str(f, "title") || null });
+    id = r.rfx.id;
+  });
+  if (res.error) return res;
+  redirect(`/rfx/${id}?tab=lines`);
+}
+
+export async function removeQuestionUI(rfxId: string, no: string, _: FormState, f: FormData): Promise<FormState> {
+  return act((ctx) => A.removeQuestionsAction(ctx, rfxId, [no], str(f, "reason")), `Question ${no} removed.`);
+}
+
+export async function withdrawAwardUI(rfxId: string, awardId: string, _: FormState, f: FormData): Promise<FormState> {
+  return act((ctx) => A.withdrawAwardAction(ctx, rfxId, str(f, "reason"), awardId), "Award withdrawn. The approval link no longer accepts a decision.");
+}
+
+export async function addLineNoteUI(rfxId: string, _: FormState, f: FormData): Promise<FormState> {
+  const lineNo = Number(str(f, "lineNo"));
+  if (!lineNo) return { error: "Choose a line." };
+  return act((ctx) => A.addLineNoteAction(ctx, rfxId, lineNo, str(f, "text")), "Note added.");
 }

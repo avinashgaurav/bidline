@@ -14,9 +14,9 @@ export const OWN_DATA_PROMPT =
 
 export function PromptList({ prompts = STARTER_PROMPTS }: { prompts?: string[] }) {
   return (
-    <ul className="grid gap-2">
+    <ul className="grid gap-1.5">
       {prompts.map((p) => (
-        <li key={p} className="flex items-start justify-between gap-3 rounded-lg bg-muted px-4 py-3 text-sm">
+        <li key={p} className="flex items-start justify-between gap-3 rounded-lg bg-muted px-3 py-2.5 text-[13px] leading-snug">
           <span>&ldquo;{p}&rdquo;</span>
           <CopyButton text={p} />
         </li>

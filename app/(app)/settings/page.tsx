@@ -16,9 +16,9 @@ export default async function SettingsPage() {
     appUrlFromHeaders(),
   ]);
   return (
-    <div className="mx-auto grid max-w-4xl gap-6">
+    <div className="mx-auto grid max-w-4xl gap-5">
       <div>
-        <h1 className="text-[28px]">Settings</h1>
+        <h1 className="text-[24px] leading-tight">Settings</h1>
         <p className="mt-1 text-ink-secondary">Your profile, the mailbox follow-ups are sent from, your Claude connection and defaults for new sourcing events.</p>
       </div>
       <Section title="Profile" text="Shown on award notes and follow-ups.">
@@ -39,7 +39,7 @@ export default async function SettingsPage() {
 
 function Section({ id, title, text, children }: { id?: string; title: string; text: string; children: React.ReactNode }) {
   return (
-    <section id={id} className="grid gap-5 rounded-xl bg-card p-6 ring-1 ring-border sm:p-8">
+    <section id={id} className="grid gap-4 rounded-xl bg-card p-4 ring-1 ring-border sm:p-6">
       <div>
         <h2 className="text-[18px]">{title}</h2>
         <p className="mt-1 text-sm text-ink-secondary">{text}</p>

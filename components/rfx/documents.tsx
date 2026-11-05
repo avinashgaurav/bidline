@@ -1,6 +1,5 @@
 import { ExternalLink, FileSpreadsheet, FileText, Image as ImageIcon, Mail } from "lucide-react";
 import type { Comparison } from "@/lib/comparison";
-import { CopyButton } from "@/components/copy-button";
 import { DocumentRowForm, Uploader } from "./documents-client";
 
 const ICON = (mime: string) =>
@@ -8,17 +7,9 @@ const ICON = (mime: string) =>
 
 export function DocumentsTab({ cmp }: { cmp: Comparison }) {
   const suppliers = cmp.suppliers.map((s) => ({ code: s.code, name: s.name }));
-  const unread = cmp.documents.filter((d) => d.status === "unread");
-  const prompt = `In Bidline, read the ${unread.length ? `${unread.length} unread` : "new"} supplier documents on ${cmp.rfx.code} one at a time and submit what each one says.`;
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-4">
       <Uploader rfxId={cmp.rfx.id} suppliers={suppliers} />
-      {unread.length ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-lavender p-4 text-sm">
-          <span><b className="font-medium">{unread.length} unread document{unread.length === 1 ? "" : "s"}.</b> Bidline has no AI inside. Ask Claude to read them: &ldquo;{prompt}&rdquo;</span>
-          <CopyButton text={prompt} label="Copy prompt" />
-        </div>
-      ) : null}
       <div className="overflow-x-auto rounded-xl bg-card ring-1 ring-border">
         <table className="w-full text-sm">
           <thead className="bg-[var(--grid-head)] text-left text-xs text-ink-secondary">

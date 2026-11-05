@@ -7,8 +7,8 @@ export function AssumptionsTab({ cmp }: { cmp: Comparison }) {
   const notes = cmp.assumptions.filter((a) => !/^(fx:|uom_|prior_po)/.test(a.key));
   const open = cmp.unmapped.filter((u) => !u.resolution);
   return (
-    <div className="grid gap-6 xl:grid-cols-2">
-      <section className="grid gap-4 rounded-xl bg-card p-6 ring-1 ring-border">
+    <div className="grid gap-4 xl:grid-cols-2">
+      <section className="grid gap-4 rounded-xl bg-card p-4 ring-1 sm:p-5 ring-border">
         <div>
           <p className="eyebrow">Exchange rates</p>
           <p className="mt-1 text-sm text-ink-secondary">Foreign currency prices convert at the rate and source shown here. A price in a currency with no rate is excluded from totals.</p>
@@ -18,7 +18,7 @@ export function AssumptionsTab({ cmp }: { cmp: Comparison }) {
         ) : <p className="text-sm text-ink-secondary">No foreign currency prices yet.</p>}
         <FxForm rfxId={cmp.rfx.id} />
       </section>
-      <section className="grid gap-4 rounded-xl bg-card p-6 ring-1 ring-border">
+      <section className="grid gap-4 rounded-xl bg-card p-4 ring-1 sm:p-5 ring-border">
         <div>
           <p className="eyebrow">Unit of measure conversions</p>
           <p className="mt-1 text-sm text-ink-secondary">How a supplier&apos;s unit of measure converts to the requested unit. A factor of 1 means both names refer to the same unit.</p>
@@ -29,7 +29,7 @@ export function AssumptionsTab({ cmp }: { cmp: Comparison }) {
         </ul>
         <UnitRuleForm rfxId={cmp.rfx.id} uoms={uoms} />
       </section>
-      <section className="grid gap-3 rounded-xl bg-card p-6 ring-1 ring-border">
+      <section className="grid gap-3 rounded-xl bg-card p-4 ring-1 sm:p-5 ring-border">
         <p className="eyebrow">Previous PO rates</p>
         {cmp.rules.priorPo ? (
           <>
@@ -38,7 +38,7 @@ export function AssumptionsTab({ cmp }: { cmp: Comparison }) {
           </>
         ) : <p className="text-sm text-ink-secondary">None recorded. If a supplier refers to a previous purchase order, ask Claude to add its rates.</p>}
       </section>
-      <section className="grid gap-3 rounded-xl bg-card p-6 ring-1 ring-border">
+      <section className="grid gap-3 rounded-xl bg-card p-4 ring-1 sm:p-5 ring-border">
         <p className="eyebrow">Unmatched items ({open.length})</p>
         <p className="text-sm text-ink-secondary">Items a supplier quoted that are not in the request. Bidline does not match them to a line unless you choose one.</p>
         {cmp.unmapped.map((u) => {
@@ -52,7 +52,7 @@ export function AssumptionsTab({ cmp }: { cmp: Comparison }) {
         })}
       </section>
       {notes.length ? (
-        <section className="grid gap-3 rounded-xl bg-card p-6 ring-1 ring-border xl:col-span-2">
+        <section className="grid gap-3 rounded-xl bg-card p-4 ring-1 sm:p-5 ring-border xl:col-span-2">
           <p className="eyebrow">Assumptions</p>
           <ul className="grid gap-2 text-sm">{notes.map((a) => <li key={a.key}><b className="font-medium">{a.key.replace(/_/g, " ")}:</b> {String(a.value)} <span className="block text-xs text-ink-secondary">{a.source}{a.note ? `. ${a.note}` : ""}</span></li>)}</ul>
         </section>
