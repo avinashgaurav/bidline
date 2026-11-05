@@ -59,7 +59,7 @@ Bidline is the system of record around the buyer's own Claude:
 | Rules & items | Exchange rates, unit rules, prior-order rates, items that match no line |
 | Exports | Comparison as Excel (with an audit-trail sheet) or CSV |
 
-## MCP tools (58)
+## MCP tools (58; 57 on by default)
 
 All tools, what each does and whether it reads or changes, are listed in the app under Claude tools, where an admin can switch any of them off for the workspace. A person's Claude is offered only the tools their role allows; a read-only connector link offers reading tools only.
 
