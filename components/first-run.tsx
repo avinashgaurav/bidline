@@ -6,18 +6,19 @@ import { X } from "lucide-react";
 import { StartChoice } from "@/components/start-choice";
 import { ConnectStep } from "@/components/onboarding";
 
-const SKIPPED = "bidline:connect-skipped";
+// "Skip" is remembered per person, so a teammate on the same browser still sees the step.
+const keyFor = (userId: string) => `bidline:connect-skipped:${userId}`;
 const listeners = new Set<() => void>();
-const readSkipped = () => {
+const readSkipped = (key: string) => {
   try {
-    return localStorage.getItem(SKIPPED) === "1";
+    return localStorage.getItem(key) === "1";
   } catch {
     return false;
   }
 };
-const setSkipped = () => {
+const setSkipped = (key: string) => {
   try {
-    localStorage.setItem(SKIPPED, "1");
+    localStorage.setItem(key, "1");
   } catch {
     // private window: the step shows again next time, which is harmless
   }
@@ -34,13 +35,14 @@ const subscribe = (l: () => void) => {
  *   2. connect Claude (skippable)
  * then the organisation dashboard. "New sourcing event" anywhere reopens step 1.
  */
-export function FirstRun({ hasEvents, canEdit, connected, connectorUrl }: {
-  hasEvents: boolean; canEdit: boolean; connected: boolean; connectorUrl: string;
+export function FirstRun({ hasEvents, canEdit, connected, connectorUrl, userId }: {
+  hasEvents: boolean; canEdit: boolean; connected: boolean; connectorUrl: string; userId: string;
 }) {
   const router = useRouter();
   const path = usePathname();
   const sp = useSearchParams();
-  const skipped = useSyncExternalStore(subscribe, readSkipped, () => true);
+  const skipKey = keyFor(userId);
+  const skipped = useSyncExternalStore(subscribe, () => readSkipped(skipKey), () => true);
   const [closedStart, setClosedStart] = useState(false);
   const [closedConnect, setClosedConnect] = useState(false);
 
@@ -49,7 +51,8 @@ export function FirstRun({ hasEvents, canEdit, connected, connectorUrl }: {
   // keep the connect card on screen after the first call lands, until the person moves on
   const [justConnected, setJustConnected] = useState(false);
   const isConnected = connected || justConnected;
-  const showConnect = !showStart && !closedConnect && !connected && !skipped && (sp.get("welcome") === "demo" || hasEvents);
+  // Step 2 always follows step 1; afterwards it shows until connected or skipped.
+  const showConnect = !showStart && !closedConnect && !connected && (sp.get("welcome") === "demo" || (!skipped && hasEvents));
   const connectOpen = showConnect || (justConnected && !closedConnect);
 
   const clearParams = () => {
@@ -60,7 +63,7 @@ export function FirstRun({ hasEvents, canEdit, connected, connectorUrl }: {
     clearParams();
   };
   const closeConnect = (skip: boolean) => {
-    if (skip) setSkipped();
+    if (skip) setSkipped(skipKey);
     setClosedConnect(true);
     clearParams();
   };
