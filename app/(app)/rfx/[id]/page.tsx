@@ -1,3 +1,4 @@
+import { Money } from "@/components/money";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronRight } from "lucide-react";
@@ -5,7 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { NotFound, getLineNotes, qualityGate, resolveRfx } from "@/lib/rfx";
 import { loadComparison } from "@/lib/comparison";
 import { listEvents } from "@/lib/events";
-import { gridView, inrShort } from "@/lib/view";
+import { gridView } from "@/lib/view";
 import { ComparisonGrid } from "@/components/rfx/grid";
 import { DocumentsTab } from "@/components/rfx/documents";
 import { LinesTab } from "@/components/rfx/lines";
@@ -27,9 +28,10 @@ import { eventAccess, listMembers } from "@/lib/team";
 import { can } from "@/lib/roles";
 import { one } from "@/lib/db";
 import { StarButton } from "@/components/star-button";
+import { itemHistory } from "@/lib/item-history";
 import { STAGE } from "@/lib/stages";
 import { Archive, Eye } from "lucide-react";
-import { DuplicateButton } from "@/components/rfx/edit-extras";
+import { DuplicateButton, SaveTemplateButton } from "@/components/rfx/edit-extras";
 import { SUGGESTIONS } from "@/lib/insights";
 
 const TABS = EVENT_STEPS.map((s) => [s.tab, s.label] as const);
@@ -72,6 +74,8 @@ export default async function RfxPage({ params, searchParams }: {
     user_request: e.user_request, summary: e.summary, detail: (e.detail ?? {}) as Record<string, unknown>, created_at: e.created_at,
   }));
   const tab = TABS.some(([k]) => k === sp.tab) ? sp.tab! : "overview";
+  const edits = tab === "lines" || tab === "suppliers" ? await itemHistory(rfx.id) : {};
+
   const unread = cmp.documents.filter((d) => d.status === "unread").length;
   const gate = qualityGate(cmp.lines);
   const c = cmp.compliance;
@@ -106,8 +110,8 @@ export default async function RfxPage({ params, searchParams }: {
       {tab === "overview" ? <OverviewTab cmp={cmp} /> : null}
       {tab === "comparison" ? <ComparisonGrid view={gridView(cmp)} /> : null}
       {tab === "documents" ? <DocumentsTab cmp={cmp} canEdit={canEdit} /> : null}
-      {tab === "lines" ? <LinesTab cmp={cmp} gate={gate} notes={notes} buyerName={user.name} /> : null}
-      {tab === "suppliers" ? <SuppliersTab cmp={cmp} /> : null}
+      {tab === "lines" ? <LinesTab cmp={cmp} gate={gate} notes={notes} buyerName={user.name} edits={edits} /> : null}
+      {tab === "suppliers" ? <SuppliersTab cmp={cmp} edits={edits} /> : null}
       {tab === "questionnaire" ? <QuestionnaireTab cmp={cmp} /> : null}
       {tab === "chase" ? <ChaseTab cmp={cmp} canEdit={canEdit} /> : null}
       {tab === "award" ? <AwardTab cmp={cmp} canEdit={canEdit} canApprove={can(rfx.my_role, "approve")} /> : null}
@@ -116,7 +120,7 @@ export default async function RfxPage({ params, searchParams }: {
   );
 
   return (
-    <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+    <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_auto]">
       <div className="@container grid min-w-0 content-start gap-4">
         <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
           <div className="min-w-0">
@@ -149,6 +153,7 @@ export default async function RfxPage({ params, searchParams }: {
               <AccessButton rfxId={rfx.id} restricted={access.restricted} people={access.people} createdBy={access.createdBy} members={team.members} />
             ) : null}
             {canEdit ? <DuplicateButton rfxId={rfx.id} title={rfx.title} /> : null}
+            {canEdit ? <SaveTemplateButton rfxId={rfx.id} title={rfx.title} /> : null}
             {canEdit ? <ArchiveButton rfxId={rfx.id} archived={Boolean(rfx.archived_at)} /> : null}
             <ExportMenu rfxId={rfx.id} />
           </div>
@@ -165,12 +170,12 @@ export default async function RfxPage({ params, searchParams }: {
         {tab === "overview" ? (<>
         <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border ring-1 ring-border @2xl:grid-cols-3 @5xl:grid-cols-5">
           <Kpi label="Lowest total, all suppliers" help="The cheapest price on every line, whichever supplier offered it. Ignores qualification. Prices that need review are left out."
-            value={cmp.hasAnyReading ? inrShort(c.naive.totalInr) : "None yet"} sub={cmp.hasAnyReading ? `${c.naive.linesAwarded} of ${cmp.lines.length} lines priced` : "No quotes read yet"} />
+            value={cmp.hasAnyReading ? <Money short value={c.naive.totalInr} /> : "None yet"} sub={cmp.hasAnyReading ? `${c.naive.linesAwarded} of ${cmp.lines.length} lines priced` : "No quotes read yet"} />
           <Kpi label="Lowest total, qualified only" help="The same, using only suppliers who pass the questionnaire (certificates, warranty, delivery). This is the basis for a defensible award."
-            value={!cmp.questions.length ? "No questions" : showQualified ? inrShort(c.compliant.totalInr) : "Waiting"}
+            value={!cmp.questions.length ? "No questions" : showQualified ? <Money short value={c.compliant.totalInr} /> : "Waiting"}
             sub={!cmp.questions.length ? "Add questions to qualify suppliers" : showQualified ? `${c.compliant.linesAwarded} of ${cmp.lines.length} lines · ${c.qualifiedVendors.length} qualified` : "Ask Claude to read the questionnaire answers"} />
           <Kpi label="Extra cost of qualified suppliers" help="How much more the qualified total costs than the lowest total. What you pay for choosing suppliers who meet your requirements."
-            value={showQualified && c.naive.totalInr && c.compliant.linesAwarded ? inrShort(c.deltaInr) : "Not yet"}
+            value={showQualified && c.naive.totalInr && c.compliant.linesAwarded ? <Money short value={c.deltaInr} /> : "Not yet"}
             sub={showQualified && c.likeForLike.warning ? "Covers different lines, see Award" : showQualified ? "Qualified minus lowest" : "Needs questionnaire answers"} />
           <Kpi label="Prices to check" help="Prices Bidline will not count until a person checks them: unreadable, two readings disagree, no source quoted, or not a firm price."
             value={String(needsPerson)} sub={needsPerson ? `Kept out of totals${unmatched ? ` · ${unmatched} unmatched item${unmatched === 1 ? "" : "s"}` : ""}` : unmatched ? `${unmatched} unmatched item${unmatched === 1 ? "" : "s"} to place` : "Nothing to check"} warn={needsPerson > 0} href={needsPerson ? `/rfx/${rfx.id}?tab=comparison` : undefined} />
@@ -196,7 +201,7 @@ export default async function RfxPage({ params, searchParams }: {
   );
 }
 
-function Kpi({ label, value, sub, help, warn = false, href, className = "" }: { label: string; value: string; sub?: string; help: string; warn?: boolean; href?: string; className?: string }) {
+function Kpi({ label, value, sub, help, warn = false, href, className = "" }: { label: string; value: React.ReactNode; sub?: string; help: string; warn?: boolean; href?: string; className?: string }) {
   const body = (
     <>
       <span className="flex items-center gap-1.5 text-xs text-ink-secondary">{label}<InfoTip text={help} label={`About ${label}`} /></span>

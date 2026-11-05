@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { moneyShort } from "@/lib/prefs";
+import { usePrefs } from "@/components/prefs-provider";
 
 /** A number that counts up once when it first appears. Shows the final value straight away for reduced motion. */
 export function CountUp({ value, format = "int", className }: { value: number; format?: "int" | "inr"; className?: string }) {
@@ -20,7 +22,8 @@ export function CountUp({ value, format = "int", className }: { value: number; f
     return () => cancelAnimationFrame(raf);
   }, [value]);
   const v = shown ?? value;
-  return <span className={className}>{format === "inr" ? inrCompact(v) : Math.round(v).toLocaleString("en-IN")}</span>;
+  const prefs = usePrefs();
+  return <span className={className}>{format === "inr" ? moneyShort(v, prefs) : Math.round(v).toLocaleString(prefs.numberFormat === "indian" ? "en-IN" : "en-US")}</span>;
 }
 
 export function inrCompact(v: number): string {

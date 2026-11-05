@@ -574,3 +574,20 @@ begin
   end loop;
   alter table events enable trigger events_no_update_trg;
 end $do$;
+
+-- Event templates: an event's line items and questions, saved to start the next one.
+create table if not exists rfx_templates (
+  id           text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  name         text not null,
+  event_type   text not null default 'RFQ',
+  lines        jsonb not null default '[]'::jsonb,
+  questions    jsonb not null default '[]'::jsonb,
+  from_rfx     text references rfx(id) on delete set null,
+  created_by   text references users(id) on delete set null,
+  created_at   timestamptz not null default now()
+);
+create index if not exists rfx_templates_ws_idx on rfx_templates(workspace_id);
+
+-- Each person's display preferences (Settings, Preferences).
+alter table users add column if not exists prefs jsonb not null default '{}'::jsonb;

@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { ClaudeMark } from "@/components/claude-mark";
+import { ByTag } from "@/components/edited-tag";
+import { date, time } from "@/lib/prefs";
+import { usePrefs } from "@/components/prefs-provider";
 import { DETAIL_LABEL, actorOf, entityOf, fmtValue, kindLabel } from "@/lib/audit-format";
 
 export interface FeedEntry {
@@ -21,7 +24,6 @@ export interface FeedEntry {
   created_at: string;
 }
 
-const dayOf = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
 
 /**
  * Audit entries grouped by day. Each says who (and through what), when to the
@@ -29,16 +31,17 @@ const dayOf = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { weekd
  * values before and after. `showEvent` adds the event each entry belongs to.
  */
 export function AuditFeed({ entries, showEvent = false, dense = false }: { entries: FeedEntry[]; showEvent?: boolean; dense?: boolean }) {
+  const prefs = usePrefs();
   const days = useMemo(() => {
     const out: Array<[string, FeedEntry[]]> = [];
     for (const e of entries) {
-      const d = dayOf(e.created_at);
+      const d = date(e.created_at, prefs);
       const last = out.at(-1);
       if (last && last[0] === d) last[1].push(e);
       else out.push([d, [e]]);
     }
     return out;
-  }, [entries]);
+  }, [entries, prefs]);
   if (!entries.length) return <p className="py-6 text-center text-[13px] text-ink-secondary">Nothing recorded for these filters yet.</p>;
   return (
     <div>
@@ -55,6 +58,7 @@ export function AuditFeed({ entries, showEvent = false, dense = false }: { entri
 }
 
 function Entry({ e, showEvent, dense }: { e: FeedEntry; showEvent: boolean; dense: boolean }) {
+  const prefs = usePrefs();
   const [open, setOpen] = useState(false);
   const who = actorOf(e.actor, e.user_name, e.detail);
   const item = entityOf(e.kind, e.detail, e.rfx_code);
@@ -66,11 +70,12 @@ function Entry({ e, showEvent, dense }: { e: FeedEntry; showEvent: boolean; dens
         {e.actor === "claude" ? <ClaudeMark className="size-2.5" /> : <span className={`size-1.5 rounded-full ${e.actor === "approver" ? "bg-success" : e.actor === "user" ? "bg-primary" : "bg-fog"}`} />}
       </span>
       <div className="flex flex-wrap items-baseline gap-x-1.5 text-[12px] text-ink-secondary">
-        <span className="font-medium text-foreground">{who.name}</span>
+        <ByTag actor={e.actor} />
+        <span className="font-medium text-foreground">{e.actor === "user" || e.actor === "approver" ? who.name : e.actor === "claude" ? "Claude" : who.name}</span>
         <span>{who.via}</span>
         <span aria-hidden>·</span>
         <time className="num" dateTime={e.created_at} title={new Date(e.created_at).toISOString()}>
-          {new Date(e.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          {time(e.created_at, prefs, true)}
         </time>
       </div>
       <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px]">

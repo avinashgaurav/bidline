@@ -1,3 +1,4 @@
+import { Money } from "@/components/money";
 import Link from "next/link";
 import { AlertCircle, ArrowRight, ArrowUpRight, CheckCircle2, ChevronRight, Scale, TrendingDown, Users } from "lucide-react";
 import { requireUser } from "@/lib/auth";
@@ -12,7 +13,6 @@ import { savingsOpportunities } from "@/lib/opportunities";
 import { can } from "@/lib/roles";
 import { STAGE, STAGE_ORDER, inView } from "@/lib/stages";
 import { actorOf } from "@/lib/audit-format";
-import { inrShort } from "@/lib/view";
 import { CountUp } from "@/components/count-up";
 import { Ago } from "@/components/ago";
 import { PromptList } from "@/components/prompt-list";
@@ -36,7 +36,7 @@ function greeting() {
 export default async function Home() {
   const user = await requireUser();
   const [all, audit, approvals] = await Promise.all([
-    listRfxs(user.id), listAudit(user.id, { limit: 8 }, { all: can(user.role, "audit_all") }), awaitingMyApproval(user.id),
+    listRfxs(user.id), listAudit(user.id, { limit: 6, noLookups: true }, { all: can(user.role, "audit_all") }), awaitingMyApproval(user.id),
   ]);
   const savings = await savingsOpportunities(user.id, all);
   const events = all.filter((e) => !e.archived_at);
@@ -90,7 +90,8 @@ export default async function Home() {
   const list = todos(events, approvals, canEdit);
   const states = await todoStates(user.workspace_id);
   const mine = myQueue(todos(events, [], canEdit), user.id, states, Number(new Date()));
-  const recent = [...events].sort((a, b) => +new Date(b.last_activity ?? b.updated_at) - +new Date(a.last_activity ?? a.updated_at)).slice(0, 7);
+  const now = Number(new Date());
+  const dueList = events.filter((e) => e.due_at && !["awarded", "closed"].includes(e.status)).sort((a, b) => +new Date(a.due_at!) - +new Date(b.due_at!)).slice(0, 6);
 
   return (
     <div className="grid gap-5">
@@ -104,6 +105,16 @@ export default async function Home() {
         </div>
       </header>
 
+      {!connected ? (
+        <Link href="/connect" className="rise flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-night px-4 py-3 text-on-dark hover:bg-night-raised sm:px-5">
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#F6EEE8]"><ClaudeMark className="size-5" /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[14.5px] font-medium">Connect your Claude to read supplier quotes</span>
+            <span className="block text-[13px] text-fog">Bidline has no AI of its own. It takes a minute, and every change Claude makes is logged.</span>
+          </span>
+          <span className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-white px-3.5 text-[13.5px] text-night">Connect Claude <ArrowUpRight className="size-3.5" /></span>
+        </Link>
+      ) : null}
       <HomeTabs active="overview" workCount={mine.active.length + approvals.length} />
       <ApprovalsBanner items={approvals.map((a) => ({ rfxId: a.rfx_id, code: a.code, title: a.title, totalInr: a.total_inr, since: a.created_at }))} />
 
@@ -148,48 +159,41 @@ export default async function Home() {
 
           <section className="rise overflow-hidden rounded-xl bg-card ring-1 ring-border" style={{ animationDelay: "220ms" }}>
             <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-              <h2 className="text-[15px] font-medium">Recently active</h2>
+              <h2 className="text-[15px] font-medium">Quotes due</h2>
               <Link href="/events" className="inline-flex items-center gap-1 text-[13px] text-primary hover:underline">All sourcing events <ArrowRight className="size-3.5" /></Link>
             </div>
-            <div className="hidden grid-cols-[minmax(0,1fr)_130px_150px_96px] gap-4 border-b border-border bg-[var(--grid-head)] px-4 py-2 text-[12px] text-ink-secondary md:grid">
-              <span>Event</span><span>Stage</span><span>Quotes in</span><span>Due</span>
-            </div>
-            <ul>
-              {recent.map((r) => {
-                const st = STAGE[r.status] ?? STAGE.draft;
-                const pct = r.supplier_count ? Math.round((r.responded / r.supplier_count) * 100) : 0;
-                return (
-                  <li key={r.id} className="border-b border-border last:border-0">
-                    <Link href={`/rfx/${r.id}`} className="group grid gap-x-4 gap-y-1.5 px-4 py-2.5 hover:bg-muted/50 md:grid-cols-[minmax(0,1fr)_130px_150px_96px] md:items-center">
-                      <span className="min-w-0">
-                        <span className="block truncate text-[14px] font-medium group-hover:text-primary">{r.title}</span>
-                        <span className="block truncate text-[12px] text-ink-secondary"><span className="num">{r.code}</span> · {r.line_count} items · {r.owner_name ?? "Unknown"}</span>
-                      </span>
-                      <span><Tip text={st.help}><span tabIndex={0} className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] ${st.chip}`}><span className={`size-1.5 rounded-full ${st.dot}`} />{st.label}</span></Tip></span>
-                      <span className="grid gap-1">
-                        <span className="num text-[12.5px]">{r.responded} of {r.supplier_count}</span>
-                        <span className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden><span className="grow-x block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} /></span>
-                      </span>
-                      <span className="num text-[12.5px] text-ink-secondary">{r.due_at ? new Date(r.due_at).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "No date"}</span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
+            {dueList.length ? (
+              <ul>
+                {dueList.map((r) => {
+                  const st = STAGE[r.status] ?? STAGE.draft;
+                  const pct = r.supplier_count ? Math.round((r.responded / r.supplier_count) * 100) : 0;
+                  const days = Math.round((new Date(r.due_at!).getTime() - now) / 86_400_000);
+                  return (
+                    <li key={r.id} className="border-b border-border last:border-0">
+                      <Link href={`/rfx/${r.id}`} className="group grid gap-x-4 gap-y-1.5 px-4 py-2.5 hover:bg-muted/50 md:grid-cols-[minmax(0,1fr)_130px_150px_110px] md:items-center">
+                        <span className="min-w-0">
+                          <span className="block truncate text-[14px] font-medium group-hover:text-primary">{r.title}</span>
+                          <span className="block truncate text-[12px] text-ink-secondary"><span className="num">{r.code}</span> · {r.line_count} items</span>
+                        </span>
+                        <span><span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] ${st.chip}`}><span className={`size-1.5 rounded-full ${st.dot}`} />{st.label}</span></span>
+                        <span className="grid gap-1">
+                          <span className="num text-[12.5px]">{r.responded} of {r.supplier_count} quoted</span>
+                          <span className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden><span className="grow-x block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} /></span>
+                        </span>
+                        <span className={`num text-[12.5px] ${days < 0 ? "text-destructive" : days <= 3 ? "text-warning" : "text-ink-secondary"}`}>
+                          {days < 0 ? `${-days} day${days === -1 ? "" : "s"} overdue` : days === 0 ? "Due today" : `In ${days} day${days === 1 ? "" : "s"}`}
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : <p className="px-4 py-4 text-[13.5px] text-ink-secondary">No open event has a due date yet.</p>}
           </section>
         </div>
 
         <aside className="grid content-start gap-5">
-          {!connected ? (
-            <Link href="/connect" className="rise flex items-start gap-3 rounded-xl bg-night p-4 text-on-dark hover:bg-night-raised" style={{ animationDelay: "120ms" }}>
-              <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#F6EEE8]"><ClaudeMark className="size-5" /></span>
-              <span className="min-w-0">
-                <span className="block text-[14px] font-medium">Connect Claude to read quotes</span>
-                <span className="mt-0.5 block text-[13px] text-fog">Bidline has no AI of its own. Your Claude reads supplier files and sends the prices here. One minute to set up.</span>
-                <span className="mt-2 inline-flex items-center gap-1 text-[13px] text-white">Connect now <ArrowUpRight className="size-3.5" /></span>
-              </span>
-            </Link>
-          ) : null}
+
 
           <section className="rise rounded-xl bg-card p-4 ring-1 ring-border" style={{ animationDelay: "180ms" }}>
             <div className="flex items-baseline justify-between gap-2">
@@ -294,7 +298,7 @@ function Savings({ data }: { data: Awaited<ReturnType<typeof savingsOpportunitie
           <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="img" aria-label={`${data.pct}% of savings found are captured`}>
             <span className="grow-x block h-full rounded-full bg-success" style={{ width: `${data.pct}%` }} />
           </div>
-          <p className="num mt-1 text-[11.5px] text-ink-secondary">{inrShort(data.captured)} of {inrShort(data.identified)} found</p>
+          <p className="num mt-1 text-[11.5px] text-ink-secondary">{<Money short value={data.captured} />} of {<Money short value={data.identified} />} found</p>
         </div>
       </div>
       {data.items.length ? (
@@ -309,7 +313,7 @@ function Savings({ data }: { data: Awaited<ReturnType<typeof savingsOpportunitie
                     <span className="block truncate text-[14px]">{o.text}</span>
                     <span className="block truncate text-[12px] text-ink-secondary"><span className="num">{o.code}</span> · {o.title}</span>
                   </span>
-                  <span className="num shrink-0 text-right text-[14px] font-medium">{inrShort(o.inr)}<span className="block text-[11px] font-normal text-ink-secondary">{o.kind === "under_budget" ? "under budget" : o.kind === "qualify_cost" ? "extra cost" : "at stake"}</span></span>
+                  <span className="num shrink-0 text-right text-[14px] font-medium">{<Money short value={o.inr} />}<span className="block text-[11px] font-normal text-ink-secondary">{o.kind === "under_budget" ? "under budget" : o.kind === "qualify_cost" ? "extra cost" : "at stake"}</span></span>
                   <span className="hidden shrink-0 items-center gap-1 text-[13px] text-primary sm:inline-flex">{o.action}<ChevronRight className="size-3.5" /></span>
                 </Link>
               </li>

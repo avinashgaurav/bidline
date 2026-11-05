@@ -76,7 +76,7 @@ export function FirstRun({ hasEvents, canEdit, connected, connectorUrl }: {
   if (connectOpen) {
     return (
       <Modal label="Connect Claude" onClose={() => closeConnect(!isConnected)}>
-        <ConnectStep url={connectorUrl} connected={isConnected}
+        <ConnectStep url={connectorUrl} connected={isConnected} stepLabel={sp.get("welcome") === "demo" ? "Step 2 of 2" : null}
           onConnected={() => setJustConnected(true)}
           onSkip={() => closeConnect(true)} onContinue={() => closeConnect(false)} />
       </Modal>
@@ -95,8 +95,8 @@ function Modal({ label, onClose, children }: { label: string; onClose?: () => vo
   return (
     <div role="dialog" aria-modal="true" aria-label={label}
       className="fixed inset-0 z-50 overflow-y-auto bg-night/35 backdrop-blur-[8px] backdrop-saturate-150 motion-safe:animate-in motion-safe:fade-in-0">
-      <div className="flex min-h-full items-center justify-center p-4 sm:p-8">
-        <div className="relative w-full max-w-[640px] rounded-2xl bg-card p-6 shadow-[0_1px_2px_rgba(23,23,33,0.06),0_28px_70px_-16px_rgba(23,23,33,0.4)] sm:p-8 motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:fade-in-0 motion-safe:duration-300">
+      <div className="flex min-h-full items-center justify-center p-4">
+        <div className="relative max-h-[calc(100dvh-32px)] w-full max-w-[560px] overflow-y-auto rounded-2xl bg-card p-5 shadow-[0_1px_2px_rgba(23,23,33,0.06),0_28px_70px_-16px_rgba(23,23,33,0.4)] sm:p-7 motion-safe:animate-in motion-safe:zoom-in-95 motion-safe:fade-in-0 motion-safe:duration-300">
           {onClose ? (
             <button onClick={onClose} aria-label="Close" className="absolute top-4 right-4 rounded-lg p-1.5 text-ink-secondary hover:bg-muted hover:text-foreground"><X className="size-4" /></button>
           ) : null}

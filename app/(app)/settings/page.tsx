@@ -7,7 +7,8 @@ import { PROVIDERS, getEmailAccount } from "@/lib/mail";
 import { NOTIFY_KINDS, readNotify } from "@/lib/notify";
 import { can, roleLabel } from "@/lib/roles";
 import { ConnectCard } from "@/components/connect-card";
-import { DefaultsForm, EmailForm, NotifyForm, ProfileForm } from "@/components/settings/forms";
+import { DefaultsForm, EmailForm, NotifyForm, PrefsForm, ProfileForm } from "@/components/settings/forms";
+import { readPrefs } from "@/lib/prefs";
 import { AdminPanel } from "@/components/admin/panel";
 import { ChannelForm, ChannelRow, ReadOnlyLink } from "@/components/settings/extra";
 import { CHANNEL_KINDS, listChannels } from "@/lib/channels";
@@ -17,6 +18,7 @@ export const maxDuration = 60;
 
 const PERSONAL = [
   ["profile", "Profile"],
+  ["preferences", "Preferences"],
   ["notifications", "Notifications"],
   ["integrations", "Integrations"],
   ["claude", "API and Claude"],
@@ -35,8 +37,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const tabs = [...PERSONAL, ...(admin ? ADMIN : [])];
   const tab = tabs.some(([k]) => k === t) ? t! : "profile";
   const [me, account, base, channels] = await Promise.all([
-    one<{ company: string | null; job_title: string | null; followup_days: number; default_approver_name: string | null; default_approver_email: string | null; notify: unknown; mcp_token_ro: string | null }>(
-      "select company, job_title, followup_days, default_approver_name, default_approver_email, notify, mcp_token_ro from users where id = $1", [user.id]),
+    one<{ company: string | null; job_title: string | null; followup_days: number; default_approver_name: string | null; default_approver_email: string | null; notify: unknown; mcp_token_ro: string | null; prefs: unknown }>(
+      "select company, job_title, followup_days, default_approver_name, default_approver_email, notify, mcp_token_ro, prefs from users where id = $1", [user.id]),
     getEmailAccount(user.id),
     appUrlFromHeaders(),
     admin ? listChannels(user.workspace_id) : Promise.resolve([]),
@@ -70,6 +72,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 <DefaultsForm followupDays={me?.followup_days ?? 3} approverName={me?.default_approver_name ?? ""} approverEmail={me?.default_approver_email ?? ""} />
               </Section>
             </>
+          ) : null}
+          {tab === "preferences" ? (
+            <Section title="Preferences" text="How money, numbers and dates read for you. Others in the workspace keep their own.">
+              <PrefsForm prefs={readPrefs(me?.prefs)} />
+            </Section>
           ) : null}
           {tab === "notifications" ? (
             <Section title="Email me when" text="Pick what deserves an email. Everything also shows under the bell at the top of every page.">

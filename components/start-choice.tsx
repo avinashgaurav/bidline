@@ -1,13 +1,14 @@
 "use client";
 
-import { useActionState, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Copy, FileSpreadsheet, FolderOpen, PencilLine } from "lucide-react";
-import { createRfxUI, loadDemoAction, type FormState } from "@/app/actions";
+import { useActionState, useEffect, useState } from "react";
+import { ArrowLeft, ArrowRight, Check, Copy, FileSpreadsheet, FolderOpen, LayoutTemplate, PencilLine } from "lucide-react";
+import { createFromTemplateUI, createRfxUI, listTemplatesUI, loadDemoAction, type FormState } from "@/app/actions";
+import type { Template } from "@/lib/templates";
 import { ClaudeMark } from "@/components/claude-mark";
 import { Field, FormMessage, SubmitButton, fieldClass } from "@/components/form-bits";
 import { OWN_DATA_PROMPT } from "@/components/prompt-list";
 
-type Stage = "ask" | "demo" | "own" | "claude" | "form";
+type Stage = "ask" | "demo" | "own" | "claude" | "form" | "template";
 
 /**
  * Starting a sourcing event as one question at a time: demo data or your own
@@ -15,6 +16,14 @@ type Stage = "ask" | "demo" | "own" | "claude" | "form";
  */
 export function StartChoice({ heading = "How do you want to start?" }: { heading?: string }) {
   const [stage, setStage] = useState<Stage>("ask");
+  const [templates, setTemplates] = useState<Template[]>([]);
+  useEffect(() => {
+    let live = true;
+    listTemplatesUI().then((t) => live && setTemplates(t)).catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
   const back = (to: Stage) => (
     <button type="button" onClick={() => setStage(to)} className="inline-flex items-center gap-1.5 text-[13px] text-ink-secondary hover:text-foreground">
       <ArrowLeft className="size-3.5" /> Back
@@ -39,6 +48,10 @@ export function StartChoice({ heading = "How do you want to start?" }: { heading
                 text="Describe the purchase in a Claude chat. Claude creates the event here with line items and suppliers." onClick={() => setStage("claude")} />
               <Choice icon={<PencilLine className="size-5 text-primary" />} title="Fill in a short form here"
                 text="Name the purchase, set a due date and approver. Add line items and suppliers after." onClick={() => setStage("form")} />
+              {templates.length ? (
+                <Choice icon={<LayoutTemplate className="size-5 text-primary" />} title="Start from a template" badge={`${templates.length}`}
+                  text="Reuse the line items and questions of an earlier purchase. Add this round's suppliers after." onClick={() => setStage("template")} />
+              ) : null}
             </>
           ) : (
             <>
@@ -56,6 +69,7 @@ export function StartChoice({ heading = "How do you want to start?" }: { heading
 
   if (stage === "demo") return <DemoConfirm back={back("ask")} />;
   if (stage === "claude") return <ClaudeSetup back={back("own")} />;
+  if (stage === "template") return <TemplateSetup back={back("own")} templates={templates} />;
   return <FormSetup back={back("own")} />;
 }
 
@@ -160,6 +174,30 @@ function FormSetup({ back }: { back: React.ReactNode }) {
         <Field label="Approver">
           <input name="approver" className={fieldClass} placeholder="e.g. CFO name" />
         </Field>
+      </div>
+      <FormMessage state={state} />
+      <div><SubmitButton>Create sourcing event</SubmitButton></div>
+    </form>
+  );
+}
+
+function TemplateSetup({ back, templates }: { back: React.ReactNode; templates: Template[] }) {
+  const [state, action] = useActionState<FormState, FormData>(createFromTemplateUI, {});
+  return (
+    <form action={action} className="grid gap-4">
+      <div>
+        {back}
+        <h2 className="mt-3 text-[24px] leading-tight">Start from a template</h2>
+        <p className="mt-1 text-[15px] text-ink-secondary">The line items and questions are copied. You add this round&apos;s suppliers next.</p>
+      </div>
+      <Field label="Template">
+        <select name="template" required className={fieldClass}>
+          {templates.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.line_count} lines, {t.question_count} questions)</option>)}
+        </select>
+      </Field>
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_170px]">
+        <Field label="Name for this event (optional)"><input name="title" className={fieldClass} placeholder="Same as the template" /></Field>
+        <Field label="Quotes due"><input name="dueDate" type="date" className={fieldClass} /></Field>
       </div>
       <FormMessage state={state} />
       <div><SubmitButton>Create sourcing event</SubmitButton></div>

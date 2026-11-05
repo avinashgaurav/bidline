@@ -2,9 +2,10 @@
 
 import { useActionState, useState } from "react";
 import { CheckCircle2, ExternalLink } from "lucide-react";
-import { disconnectEmailUI, saveDefaultsUI, saveEmailUI, saveNotifyUI, saveProfileUI, sendTestEmailUI, type FormState } from "@/app/actions";
+import { disconnectEmailUI, saveDefaultsUI, saveEmailUI, saveNotifyUI, savePrefsUI, saveProfileUI, sendTestEmailUI, type FormState } from "@/app/actions";
 import { Field, FormMessage, SubmitButton, areaClass, fieldClass } from "@/components/form-bits";
 import type { EmailAccount, Provider } from "@/lib/mail";
+import { DATE_FORMATS, TIME_ZONES, type Prefs } from "@/lib/prefs";
 
 export function ProfileForm({ name, email, company, jobTitle }: { name: string; email: string; company: string; jobTitle: string }) {
   const [state, action] = useActionState<FormState, FormData>(saveProfileUI, {});
@@ -140,6 +141,36 @@ export function NotifyForm({ prefs, kinds, mailbox }: {
         ))}
       </ul>
       <div className="flex flex-wrap items-center gap-3"><SubmitButton>Save notifications</SubmitButton><FormMessage state={state} /></div>
+    </form>
+  );
+}
+
+export function PrefsForm({ prefs }: { prefs: Prefs }) {
+  const [state, action] = useActionState<FormState, FormData>(savePrefsUI, {});
+  return (
+    <form action={action} className="grid gap-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Base currency" hint="Comparisons run in Indian rupees. Other base currencies are planned.">
+          <select name="currency" defaultValue="INR" disabled className={fieldClass}><option value="INR">INR, Indian rupee (₹)</option></select>
+        </Field>
+        <Field label="Number format">
+          <select name="numberFormat" defaultValue={prefs.numberFormat} className={fieldClass}>
+            <option value="indian">Lakh and crore: ₹12,34,567 · ₹3.88 cr</option>
+            <option value="international">Million: ₹1,234,567 · ₹38.8M</option>
+          </select>
+        </Field>
+        <Field label="Date format">
+          <select name="dateFormat" defaultValue={prefs.dateFormat} className={fieldClass}>
+            {DATE_FORMATS.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Time zone" hint="Used for times in the audit log and activity.">
+          <select name="timeZone" defaultValue={prefs.timeZone} className={fieldClass}>
+            {TIME_ZONES.map((t) => <option key={t} value={t}>{t.replace("_", " ")}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div className="flex flex-wrap items-center gap-3"><SubmitButton>Save preferences</SubmitButton><FormMessage state={state} /></div>
     </form>
   );
 }

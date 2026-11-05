@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ChevronRight, Search, Stamp } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { inrCompact } from "@/components/count-up";
+import { moneyShort } from "@/lib/prefs";
+import { usePrefs } from "@/components/prefs-provider";
 import { Ago } from "@/components/ago";
 
 interface Pending { rfxId: string; code: string; title: string; totalInr: number | null; since: string }
@@ -16,6 +17,7 @@ interface Pending { rfxId: string; code: string; title: string; totalInr: number
  */
 export function ApprovalsBanner({ items }: { items: Pending[] }) {
   const [text, setText] = useState("");
+  const prefs = usePrefs();
   const sorted = useMemo(() => [...items].sort((a, b) => (b.totalInr ?? 0) - (a.totalInr ?? 0)), [items]);
   const shown = sorted.filter((x) => !text.trim() || `${x.code} ${x.title}`.toLowerCase().includes(text.trim().toLowerCase()));
   if (!items.length) return null;
@@ -26,7 +28,7 @@ export function ApprovalsBanner({ items }: { items: Pending[] }) {
       <Link href={`/rfx/${x.rfxId}?tab=award`} className="flex items-center gap-3 rounded-xl bg-success/5 px-4 py-3 ring-1 ring-success/25 hover:bg-success/10">
         <Stamp className="size-5 text-success" />
         <span className="min-w-0 flex-1 text-[14px]"><span className="font-medium">An award is waiting for your approval</span><span className="text-ink-secondary"> · <span className="num">{x.code}</span> {x.title}</span></span>
-        <span className="num text-[14px] font-medium">{x.totalInr ? inrCompact(x.totalInr) : ""}</span>
+        <span className="num text-[14px] font-medium">{x.totalInr ? moneyShort(x.totalInr, prefs) : ""}</span>
         <ChevronRight className="size-4 text-ink-secondary" />
       </Link>
     );
@@ -35,7 +37,7 @@ export function ApprovalsBanner({ items }: { items: Pending[] }) {
     <Sheet>
       <SheetTrigger className="flex w-full items-center gap-3 rounded-xl bg-success/5 px-4 py-3 text-left ring-1 ring-success/25 hover:bg-success/10">
         <Stamp className="size-5 text-success" />
-        <span className="min-w-0 flex-1 text-[14px]"><span className="font-medium">{items.length} awards are waiting for your approval</span><span className="text-ink-secondary"> · {inrCompact(total)} in total</span></span>
+        <span className="min-w-0 flex-1 text-[14px]"><span className="font-medium">{items.length} awards are waiting for your approval</span><span className="text-ink-secondary"> · {moneyShort(total, prefs)} in total</span></span>
         <span className="text-[13px] text-primary">Review</span>
         <ChevronRight className="size-4 text-ink-secondary" />
       </SheetTrigger>
@@ -57,7 +59,7 @@ export function ApprovalsBanner({ items }: { items: Pending[] }) {
                   <span className="block truncate text-[14px]">{x.title}</span>
                   <span className="block text-[12px] text-ink-secondary"><span className="num">{x.code}</span> · sent <Ago iso={x.since} /></span>
                 </span>
-                <span className="num text-[14px] font-medium">{x.totalInr ? inrCompact(x.totalInr) : ""}</span>
+                <span className="num text-[14px] font-medium">{x.totalInr ? moneyShort(x.totalInr, prefs) : ""}</span>
               </Link>
             </li>
           ))}

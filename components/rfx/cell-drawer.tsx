@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { STATUS_ACTION } from "@/lib/ui";
 import type { CellStatus } from "@/lib/calc/normalise";
 import type { CellView, GridView, SupplierView } from "@/lib/view";
+import { ByTag } from "@/components/edited-tag";
+import { MentionTextarea } from "@/components/mention-textarea";
 import { addCellCommentUI, cellComments, cellHistory, correctCellUI, undoCorrectionUI, type FormState } from "@/app/actions";
 import { Field, FormMessage, SubmitButton, fieldClass } from "@/components/form-bits";
 
@@ -149,12 +151,13 @@ export function CellDrawer({ rfxId, supplier, line, cell, isBest, onClose }: {
           <Comments rfxId={rfxId} supplier={supplier.code} lineNo={line.no} />
 
           <section className="grid gap-2">
-            <p className="eyebrow">History</p>
+            <p className="eyebrow">History of this price</p>
+            {history[0] ? <p className="flex items-center gap-1.5 text-[12.5px] text-ink-secondary">Last changed by <ByTag actor={history[0].actor} /></p> : null}
             {history.length ? (
               <ol className="grid gap-2 text-sm">
                 {history.map((h) => (
                   <li key={h.id} className="border-b border-border pb-2 last:border-0">
-                    <span className="text-xs text-ink-secondary">{new Date(h.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })} · {h.actor === "claude" ? "Claude" : h.actor === "user" ? "In the app" : h.actor}</span>
+                    <span className="flex flex-wrap items-center gap-1.5 text-xs text-ink-secondary"><ByTag actor={h.actor} /> {new Date(h.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span>
                     <p>{h.summary}</p>
                   </li>
                 ))}
@@ -194,7 +197,7 @@ function Comments({ rfxId, supplier, lineNo }: { rfxId: string; supplier: string
         </ol>
       ) : <p className="text-sm text-ink-secondary">No comments. Note what a supplier confirmed on the phone, or ask a colleague to check.</p>}
       <form key={list.length} action={action} className="flex items-start gap-2">
-        <textarea name="text" rows={2} required placeholder="Add a comment" className="min-h-[38px] flex-1 rounded-lg border border-input bg-card px-3 py-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30" />
+        <MentionTextarea rfxId={rfxId} name="text" />
         <SubmitButton size="sm">Post</SubmitButton>
       </form>
       {state.error ? <p role="alert" className="text-sm text-destructive">{state.error}</p> : null}

@@ -71,7 +71,7 @@ export function AuditRail({ rfxId, entries }: { rfxId: string; entries: FeedEntr
   const collapsed = useSyncExternalStore(subscribe, readCollapsed, () => false);
   if (collapsed) {
     return (
-      <aside className="sticky top-[72px] hidden h-[calc(100vh-88px)] xl:block">
+      <aside className="sticky top-[72px] hidden h-[calc(100vh-88px)] w-10 xl:block">
         <Tip text="Show the audit trail" side="left">
           <button onClick={() => setCollapsed(false)} aria-label="Show the audit trail"
             className="flex h-full w-10 flex-col items-center gap-2 rounded-xl bg-card pt-3 text-ink-secondary ring-1 ring-border hover:text-foreground">
@@ -84,7 +84,7 @@ export function AuditRail({ rfxId, entries }: { rfxId: string; entries: FeedEntr
     );
   }
   return (
-    <aside className="sticky top-[72px] hidden h-[calc(100vh-88px)] overflow-hidden rounded-xl bg-card ring-1 ring-border xl:block">
+    <aside className="sticky top-[72px] hidden h-[calc(100vh-88px)] w-[340px] overflow-hidden rounded-xl bg-card ring-1 ring-border xl:block">
       <Filtered rfxId={rfxId} entries={entries} onClose={() => setCollapsed(true)} />
     </aside>
   );

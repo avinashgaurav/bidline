@@ -14,12 +14,12 @@ export const LOCKED_TOOLS = ["get_started", "list_rfxs", "get_rfx"];
 export const TOOL_GROUPS: Array<{ key: string; label: string; help: string; tools: string[]; example: string }> = [
   {
     key: "orient", label: "Find your way around", help: "What exists in the workspace and what is waiting.",
-    tools: ["get_started", "list_rfxs", "get_rfx", "search_bidline", "list_open_work", "price_history", "get_activity", "archive_rfx"],
+    tools: ["get_started", "list_rfxs", "get_rfx", "search_bidline", "list_team", "list_open_work", "price_history", "get_activity", "archive_rfx"],
     example: "What is waiting across all my sourcing events?",
   },
   {
     key: "setup", label: "Set up a sourcing event", help: "Create events, line items, questions and suppliers.",
-    tools: ["create_rfx", "update_rfx", "upsert_lines", "set_budget", "add_questions", "remove_questions", "duplicate_rfx", "add_line_note", "issue_rfx", "add_suppliers", "update_supplier"],
+    tools: ["create_rfx", "create_rfx_from_template", "list_templates", "save_template", "check_ready", "update_rfx", "upsert_lines", "set_budget", "add_questions", "remove_questions", "duplicate_rfx", "add_line_note", "issue_rfx", "add_suppliers", "update_supplier"],
     example: "Create a sourcing event for 40 chairs due 20 Nov and invite Featherlite.",
   },
   {
@@ -44,12 +44,12 @@ export const TOOL_GROUPS: Array<{ key: string; label: string; help: string; tool
   },
   {
     key: "insight", label: "Suppliers and spend", help: "How suppliers have done across events, and what has been committed against budget.",
-    tools: ["supplier_scorecard", "spend_summary"],
+    tools: ["supplier_scorecard", "spend_summary", "check_gstin"],
     example: "Which suppliers reply slowest, and what have we awarded to each this quarter?",
   },
   {
     key: "award", label: "Award and records", help: "Draft the award, send it for approval, and export the record.",
-    tools: ["create_award", "withdraw_award", "get_award_status", "get_export_link"],
+    tools: ["create_award", "withdraw_award", "decide_award", "get_award_status", "get_export_link"],
     example: "Draft the award with qualified suppliers only and give me the approval link.",
   },
 ];
@@ -61,6 +61,7 @@ export function toolAllowed(t: Pick<ToolInfo, "name" | "readOnly">, role: string
   if (disabled.includes(t.name) && !LOCKED_TOOLS.includes(t.name)) return false;
   if (t.readOnly) return true;
   if (t.name === "add_line_note" || t.name === "comment_on_price") return can(role, "note");
+  if (t.name === "decide_award") return can(role, "approve");
   return can(role, "edit");
 }
 

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CheckCircle2, Circle, Clock } from "lucide-react";
+import { BarChart3, Building2, CheckCircle2, Circle, ClipboardList, Clock, Compass, FileText, Hash, Inbox, KeyRound, Mail, MessageCircle, PencilLine, Scale, Send, Stamp, Wrench } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { disabledTools } from "@/lib/team";
 import { getEmailAccount } from "@/lib/mail";
@@ -47,10 +47,11 @@ export default async function ToolsPage() {
             const on = live[i.key];
             return (
               <li key={i.key} className="flex gap-3 border-b border-border px-4 py-3 sm:odd:border-r">
-                {i.status === "planned" ? <Clock className="mt-0.5 size-4 shrink-0 text-ink-secondary" /> : on ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" /> : <Circle className="mt-0.5 size-4 shrink-0 text-warning" />}
+                <IntegrationLogo k={i.key} />
                 <span className="min-w-0">
                   <span className="flex flex-wrap items-center gap-2 text-[14px] font-medium">{i.name}
-                    <span className={`rounded-full px-2 py-px text-[11px] font-normal ${i.status === "planned" ? "bg-muted text-ink-secondary" : on ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>
+                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-px text-[11.5px] font-normal ${i.status === "planned" ? "bg-muted text-ink-secondary" : on ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}`}>
+                      {i.status === "planned" ? <Clock className="size-3" /> : on ? <CheckCircle2 className="size-3" /> : <Circle className="size-3" />}
                       {i.status === "planned" ? "Planned" : on ? "Connected" : "Not connected"}
                     </span>
                   </span>
@@ -66,9 +67,12 @@ export default async function ToolsPage() {
       {TOOL_GROUPS.map((g) => (
         <section key={g.key} className="overflow-hidden rounded-xl bg-card ring-1 ring-border">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3">
-            <div>
-              <h2 className="text-[15px] font-medium">{g.label}</h2>
-              <p className="text-[13px] text-ink-secondary">{g.help}</p>
+            <div className="flex items-start gap-3">
+              <GroupIcon k={g.key} />
+              <div>
+                <h2 className="text-[15px] font-medium">{g.label}</h2>
+                <p className="text-[13px] text-ink-secondary">{g.help}</p>
+              </div>
             </div>
             <div className="flex max-w-full items-center gap-2 rounded-lg bg-muted px-3 py-1.5 text-[12.5px]">
               <span className="text-ink-secondary">Try:</span><span className="truncate">&ldquo;{g.example}&rdquo;</span>
@@ -105,4 +109,27 @@ export default async function ToolsPage() {
       <p className="text-[12.5px] text-ink-secondary">Changes take effect the next time Claude starts a chat. Every switch is recorded in the audit log.</p>
     </div>
   );
+}
+
+/** A small mark for each integration: the service's colour with a plain icon (no third-party logos copied). */
+function IntegrationLogo({ k }: { k: string }) {
+  const map: Record<string, { bg: string; fg: string; icon: React.ReactNode }> = {
+    claude: { bg: "#F6EEE8", fg: "#D97757", icon: <ClaudeMark className="size-5" /> },
+    smtp: { bg: "#edecfb", fg: "#5266eb", icon: <Mail className="size-5" /> },
+    gmail: { bg: "#fdecea", fg: "#d93025", icon: <Inbox className="size-5" /> },
+    whatsapp: { bg: "#e7f8ee", fg: "#1f9d55", icon: <MessageCircle className="size-5" /> },
+    erp: { bg: "#e8f1fb", fg: "#1b6fbf", icon: <Building2 className="size-5" /> },
+    slack: { bg: "#f3eaf6", fg: "#611f69", icon: <Hash className="size-5" /> },
+    sso: { bg: "#eef0f3", fg: "#3c4257", icon: <KeyRound className="size-5" /> },
+  };
+  const m = map[k] ?? map.smtp;
+  return <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-xl" style={{ background: m.bg, color: m.fg }}>{m.icon}</span>;
+}
+
+function GroupIcon({ k }: { k: string }) {
+  const icons: Record<string, React.ComponentType<{ className?: string }>> = {
+    orient: Compass, setup: ClipboardList, read: FileText, compare: Scale, correct: PencilLine, followup: Send, insight: BarChart3, award: Stamp,
+  };
+  const Icon = icons[k] ?? Wrench;
+  return <span aria-hidden className="grid size-9 shrink-0 place-items-center rounded-lg bg-secondary text-primary"><Icon className="size-4" /></span>;
 }
