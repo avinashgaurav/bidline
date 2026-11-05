@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState, useSyncExternalStore } from "react";
 import {
-  Archive, BarChart3, BellDot, BookOpen, Building2, ChevronDown, ChevronRight, History, Home, Lock, LogOut, Menu, Pin, PinOff, Plug,
+  Archive, BarChart3, BellDot, BookOpen, Building2, ChevronDown, ChevronRight, History, Home, LogOut, Menu, Pin, PinOff, Plug,
   Search, Settings, Shield, Stamp, Star, Users, Wrench,
 } from "lucide-react";
 import { Logo } from "@/components/brand";
@@ -102,11 +102,9 @@ const subscribePrefs = (l: () => void) => {
 function SidebarBody({ user, workspace, workspaces, events, connected, switchAction, logoutAction }: SidebarProps) {
   const path = usePathname();
   const sp = useSearchParams();
-  const tab = sp.get("tab") ?? "overview";
   const view = path === "/events" ? sp.get("view") ?? "all" : null;
   const adminTab = path === "/settings" ? sp.get("tab") ?? "profile" : null;
   const activeId = path.startsWith("/rfx/") ? path.split("/")[2] : null;
-  const current = events.find((e) => e.id === activeId) ?? null;
   // Pins belong to one person in one workspace.
   const [pins, setPins] = usePrefs<string[]>(`bidline:pins:v1:${user.email}:${workspace.name}`, ["view:attention", "audit"]);
   // One section open at a time; the one holding the current page opens itself.
@@ -117,7 +115,7 @@ function SidebarBody({ user, workspace, workspaces, events, connected, switchAct
   const viewItems: Item[] = EVENT_VIEWS.map((v) => {
     const n = events.filter((e) => inView(e, v.key)).length;
     return {
-      key: `view:${v.key}`, href: v.key === "all" ? "/events" : `/events?view=${v.key}`, label: v.label, help: v.help, active: view === v.key,
+      key: `view:${v.key}`, href: v.key === "all" ? "/events" : `/events?view=${v.key}`, label: v.label, help: v.help, active: view === v.key || (v.key === "all" && Boolean(activeId)),
       icon: v.key === "archived" ? <Archive className={ic} /> : v.key === "attention" ? <BellDot className={ic} /> : v.key === "approval" ? <Stamp className={ic} /> : <Building2 className={ic} />,
       count: n, warn: v.key === "attention" && n > 0,
     };
@@ -183,7 +181,6 @@ function SidebarBody({ user, workspace, workspaces, events, connected, switchAct
           </div>
         ) : null}
 
-        {current ? <CurrentEvent e={current} tab={tab} /> : null}
 
         <div className="mt-3 grid gap-1 border-t border-white/[0.08] pt-3">
           {sections.map((sec) => {
@@ -278,46 +275,6 @@ function MenuLink({ href, icon, label }: { href: string; icon: React.ReactNode; 
   return <Link href={href} className="flex items-center gap-2.5 rounded-md px-2.5 py-2 text-fog hover:bg-white/5 hover:text-white">{icon}{label}</Link>;
 }
 
-/** The open event's own sections, so moving around inside a case never needs the page. */
-function CurrentEvent({ e, tab }: { e: SidebarEvent; tab: string }) {
-  const st = STAGE[e.status] ?? STAGE.draft;
-  const parts: Array<{ tab: string; label: string; meta?: string; warn?: boolean }> = [
-    { tab: "overview", label: "Overview" },
-    { tab: "lines", label: "Line items", meta: String(e.line_count) },
-    { tab: "suppliers", label: "Suppliers", meta: `${e.responded}/${e.supplier_count}` },
-    { tab: "documents", label: "Documents", meta: e.unread_docs ? `${e.unread_docs} unread` : String(e.doc_count), warn: e.unread_docs > 0 },
-    { tab: "comparison", label: "Compare quotes" },
-    { tab: "questionnaire", label: "Questionnaire", meta: e.question_count ? String(e.question_count) : undefined },
-    { tab: "chase", label: "Follow-ups", meta: e.open_chases ? `${e.open_chases} open` : undefined, warn: e.open_chases > 0 },
-    { tab: "award", label: "Award", meta: e.award_status === "sent" ? "awaiting" : e.award_status ?? undefined, warn: e.award_status === "sent" },
-    { tab: "assumptions", label: "Rates & units" },
-  ];
-  return (
-    <section aria-label="This sourcing event" className="mt-4 rounded-lg bg-white/[0.04] p-1.5 ring-1 ring-white/[0.06] ">
-      <div className="px-2 pt-1 pb-1.5">
-        <p className="flex items-center gap-1.5 text-[11px] text-fog/70">
-          <span className={`size-1.5 rounded-full ${st.dot}`} /><span className="num">{e.code}</span> · {st.label}
-          {e.restricted ? <Lock className="size-3" aria-label="Restricted" /> : null}
-        </p>
-        <p className="mt-0.5 line-clamp-2 text-[13px] leading-snug font-medium text-white">{e.title}</p>
-      </div>
-      <ul className="grid gap-px">
-        {parts.map((p) => {
-          const here = tab === p.tab;
-          return (
-            <li key={p.tab}>
-              <Link href={`/rfx/${e.id}?tab=${p.tab}`} aria-current={here ? "page" : undefined}
-                className={`flex h-7 items-center gap-2 rounded-md px-2 text-[12.5px] ${here ? "bg-white/10 text-white" : "text-fog/90 hover:bg-white/5 hover:text-white"}`}>
-                <span className="truncate">{p.label}</span>
-                {p.meta ? <span className={`num ml-auto shrink-0 text-[11px] ${p.warn ? "text-[#f6c37b]" : "text-fog/60"}`}>{p.meta}</span> : null}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
 
 function NavLink({ href, active, icon, label, count }: { href: string; active: boolean; icon: React.ReactNode; label: string; count?: number }) {
   return (

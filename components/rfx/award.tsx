@@ -1,3 +1,4 @@
+import { Money } from "@/components/money";
 import type { Comparison } from "@/lib/comparison";
 import { appUrlFromHeaders } from "@/lib/app-url";
 import { inr } from "@/lib/view";
@@ -37,7 +38,7 @@ export async function AwardTab({ cmp, canEdit, canApprove }: { cmp: Comparison; 
             {options.filter((o) => o.lines > 0).map((o) => (
               <tr key={o.label} className="border-t border-border">
                 <td className="py-2">{o.label}{"note" in o && o.note ? <span className="block text-xs text-ink-secondary">{o.note}</span> : null}</td>
-                <td className="num py-2 text-right">{inr(o.total)}</td>
+                <td className="num py-2 text-right">{<Money value={o.total} />}</td>
                 <td className="num py-2 text-right">{o.lines}/{cmp.lines.length}</td>
               </tr>
             ))}
@@ -49,7 +50,7 @@ export async function AwardTab({ cmp, canEdit, canApprove }: { cmp: Comparison; 
         {c.likeForLike.warning && c.likeForLike.linesInCommonBasis > 0 && qualifiedReady ? (
           <div className="mt-4 cell-review rounded-lg p-3 text-sm">
             <p>{c.likeForLike.warning}</p>
-            <ul className="mt-1 list-disc pl-5">{c.likeForLike.scenarios.map((s) => <li key={s.key}>{s.label}: {inr(s.likeForLikeTotalInr)} on the {c.likeForLike.linesInCommonBasis} lines quoted by both</li>)}</ul>
+            <ul className="mt-1 list-disc pl-5">{c.likeForLike.scenarios.map((s) => <li key={s.key}>{s.label}: {<Money value={s.likeForLikeTotalInr} />} on the {c.likeForLike.linesInCommonBasis} lines quoted by both</li>)}</ul>
           </div>
         ) : null}
       </section>
@@ -86,7 +87,7 @@ export async function AwardTab({ cmp, canEdit, canApprove }: { cmp: Comparison; 
                 {st.map((x) => (
                   <li key={x.id} className="flex flex-wrap items-center gap-2">
                     <span className="num grid size-5 place-items-center rounded-full bg-card text-[11px]">{x.step + 1}</span>
-                    <span className="font-medium">{x.name}</span>{x.above_inr !== null ? <span className="text-ink-secondary">over {inr(Number(x.above_inr))}</span> : null}
+                    <span className="font-medium">{x.name}</span>{x.above_inr !== null ? <span className="text-ink-secondary">over {<Money value={Number(x.above_inr)} />}</span> : null}
                     <span className={`rounded-full px-2 py-px text-[11.5px] capitalize ${STATUS[x.status] ?? "bg-card text-ink-secondary"}`}>{x.status === "sent" ? "Deciding now" : x.status.replace(/_/g, " ")}</span>
                     {x.step > 0 && x.status === "sent" ? <span className="text-[12px] text-ink-secondary">Decided signed in to Bidline</span> : null}
                   </li>

@@ -1,3 +1,5 @@
+import { EditedTag, type Edit } from "@/components/edited-tag";
+import { GstinBadge } from "@/components/gstin-badge";
 import type { Comparison } from "@/lib/comparison";
 import { inr } from "@/lib/view";
 import { AddSupplierForm, EditSupplierForm } from "./suppliers-client";
@@ -7,7 +9,7 @@ const TERM_LABEL: Record<string, string> = {
   fxReference: "Supplier's exchange rate", fxNote: "Exchange rate note", totalLevelDiscountPercent: "Order discount %", notes: "Notes",
 };
 
-export function SuppliersTab({ cmp }: { cmp: Comparison }) {
+export function SuppliersTab({ cmp, edits = {} }: { cmp: Comparison; edits?: Record<string, Edit[]> }) {
   return (
     <div className="grid gap-4">
       <div className="grid gap-4 xl:grid-cols-2">
@@ -22,6 +24,11 @@ export function SuppliersTab({ cmp }: { cmp: Comparison }) {
                   <p className="eyebrow">{s.code} · {s.status}</p>
                   <h3 className="mt-1 text-[18px]">{s.name}</h3>
                   <p className="text-sm text-ink-secondary">{[s.city, info.vendorRef ? `quote ${info.vendorRef}` : null, info.revision > 1 ? `revision ${info.revision}` : null].filter(Boolean).join(" · ") || "No quote read yet"}</p>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    <GstinBadge gstin={s.gstin} />
+                    {s.gstin ? <span className="num text-[12px] text-ink-secondary">{s.gstin}</span> : null}
+                    <EditedTag edits={edits[`supplier:${s.code}`]} label={`${s.code} ${s.name}`} />
+                  </div>
                 </div>
                 {cmp.questions.length ? (
                   <span className={`rounded-full px-3 py-1 text-xs ${!v.assessed ? "bg-muted text-ink-secondary" : v.qualified ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>

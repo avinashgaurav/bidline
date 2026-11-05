@@ -26,7 +26,7 @@ export async function listNotifications(userId: string, limit = 30): Promise<{ i
      from events e cross join me cross join seen
      left join rfx r on r.id = e.rfx_id
      left join users u on u.id = e.user_id
-     where e.workspace_id = me.workspace_id and e.kind = any($2)
+     where e.workspace_id = me.workspace_id and (e.kind = any($2) or (e.kind = 'mentioned' and e.detail->'mentions' ? me.id))
        and e.created_at > now() - interval '30 days'
        and not (e.user_id = me.id and e.actor = 'user')
        and ((r.id is not null and ${VISIBLE} and r.archived_at is null) or (e.rfx_id is null and e.detail->>'email' = (select email from users where id = $1)))

@@ -7,7 +7,8 @@ import { ArrowDown, ArrowUp, Lock, Search, X } from "lucide-react";
 import { EVENT_VIEWS, STAGE, inView } from "@/lib/stages";
 import { ClaudeMark } from "@/components/claude-mark";
 import { Tip } from "@/components/tip";
-import { inrCompact } from "@/components/count-up";
+import { moneyShort } from "@/lib/prefs";
+import { usePrefs } from "@/components/prefs-provider";
 
 export interface EventRowLite {
   id: string; code: string; title: string; status: string; event_type: string; created_via: string; restricted: boolean;
@@ -27,6 +28,7 @@ export function EventsTable({ events, view, canEdit, initial }: {
   events: EventRowLite[]; view: string; canEdit: boolean; initial: { q?: string; owner?: string; sort?: string; dir?: string };
 }) {
   const router = useRouter();
+  const prefs = usePrefs();
   // Search, owner and sort live in the link, so a view can be bookmarked or shared.
   const [text, setTextState] = useState(initial.q ?? "");
   const [owner, setOwnerState] = useState(initial.owner ?? "");
@@ -148,8 +150,8 @@ export function EventsTable({ events, view, canEdit, initial }: {
                   </span>
                   <span className="text-[12.5px]">{waits.length ? <span className="text-warning">{waits.join(", ")}</span> : <span className="text-ink-secondary">Nothing</span>}</span>
                   <span className="num text-[13px] lg:text-right">
-                    {e.award_total_inr !== null ? <Tip text={`Latest award (${e.award_status?.replace(/_/g, " ")})`}><span tabIndex={0}>{inrCompact(e.award_total_inr)}</span></Tip>
-                      : e.budget_inr ? <Tip text="Budget: no award yet"><span tabIndex={0} className="text-ink-secondary">{inrCompact(e.budget_inr)}</span></Tip> : <span className="text-ink-secondary">n/a</span>}
+                    {e.award_total_inr !== null ? <Tip text={`Latest award (${e.award_status?.replace(/_/g, " ")})`}><span tabIndex={0}>{moneyShort(e.award_total_inr, prefs)}</span></Tip>
+                      : e.budget_inr ? <Tip text="Budget: no award yet"><span tabIndex={0} className="text-ink-secondary">{moneyShort(e.budget_inr, prefs)}</span></Tip> : <span className="text-ink-secondary">n/a</span>}
                   </span>
                 </Link>
               </li>

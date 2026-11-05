@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { refresh, revalidatePath } from "next/cache";
 import { headers } from "next/headers";
+import { after } from "next/server";
 import {
   checkLogin, clearLoginFailures, createUser, endSession, newMcpToken, normaliseEmail, recordLoginAttempt, requireUser, startSession,
 } from "@/lib/auth";
@@ -16,8 +17,11 @@ import { toolCatalog } from "@/lib/mcp/server";
 import { LOCKED_TOOLS } from "@/lib/mcp/catalog";
 import { NOTIFY_KINDS, saveNotify, type NotifyKind } from "@/lib/notify";
 import { setTodo } from "@/lib/todo-state";
+import { readPrefs } from "@/lib/prefs";
+import { createFromTemplate, deleteTemplate, listTemplates, saveTemplate } from "@/lib/templates";
 import * as C from "@/lib/channels";
 import { seedDemoRfx } from "@/lib/demo";
+import { seedExtraDemos } from "@/lib/demo-extra";
 import { disconnectEmail, getEmailAccount, saveEmailAccount, sendMail } from "@/lib/mail";
 
 export interface FormState { ok?: boolean; error?: string; message?: string; data?: Record<string, unknown> }
@@ -108,6 +112,8 @@ export async function loadDemoAction(): Promise<FormState> {
   try {
     await A.requireWorkspacePerm(user.id, "edit");
     await seedDemoRfx(user.id);
+    // Two smaller events beside it, added just after the page opens; the dashboard updates itself when they land.
+    after(() => seedExtraDemos(user.id).catch((e) => console.error("[demo-extra]", e)));
   } catch (e) {
     if (e instanceof BadInput) return { error: e.message };
     console.error(e);
@@ -175,7 +181,8 @@ export async function issueRfxUI(rfxId: string, _: FormState, f: FormData): Prom
     const ctx = await userCtx();
     const r = await A.issueRfxAction(ctx, rfxId, str(f, "overrideReason") || null);
     refresh();
-    if (!r.issued) return { error: `Not issued: ${r.gate.length} line item${r.gate.length === 1 ? " is" : "s are"} not specific enough. Fix them, or give a reason to issue anyway.` };
+    if (!r.issued && r.missing.length) return { error: `Not sent yet. Still to do: ${r.missing.map((m) => m.fix.replace(/\.$/, "").toLowerCase()).join("; ")}.` };
+    if (!r.issued) return { error: `Not sent: ${r.gate.length} line item${r.gate.length === 1 ? " is" : "s are"} not specific enough. Fix them, or give a reason to send anyway.` };
     return { ok: true, message: "Issued. Suppliers are marked as invited." };
   } catch (e) {
     return { error: (e as Error).message };
@@ -541,4 +548,46 @@ export async function removeChannelUI(id: string): Promise<FormState> {
 
 export async function testChannelUI(id: string): Promise<FormState> {
   return guarded((uid) => C.testChannel(uid, id), "Test message sent.");
+}
+
+/** Teammates who can see an event, for @mentions. */
+export async function mentionablePeople(rfxId: string) {
+  const user = await requireUser();
+  const rfx = await resolveRfx(user.id, rfxId).catch(() => null);
+  if (!rfx) return [];
+  return q<{ id: string; name: string }>(
+    `select u.id, u.name from workspace_members m join users u on u.id = m.user_id
+      where m.workspace_id = $1 and m.user_id <> $2
+        and (not $3 or m.role = 'admin' or u.id = $4 or exists (select 1 from rfx_access a where a.rfx_id = $5 and a.user_id = u.id))
+      order by u.name`, [rfx.workspace_id, user.id, rfx.restricted, rfx.user_id, rfx.id]);
+}
+
+export async function saveTemplateUI(rfxId: string, _: FormState, f: FormData): Promise<FormState> {
+  let name = "";
+  const res = await act(async (ctx) => { name = (await saveTemplate(ctx, rfxId, str(f, "name") || null)).name; });
+  return res.error ? res : { ok: true, message: `Saved as the template "${name}". Start from it under New sourcing event.` };
+}
+
+export async function listTemplatesUI() {
+  const user = await requireUser();
+  return listTemplates(user.id);
+}
+
+export async function createFromTemplateUI(_: FormState, f: FormData): Promise<FormState> {
+  let id = "";
+  const res = await act(async (ctx) => { id = (await createFromTemplate(ctx, str(f, "template"), { title: str(f, "title") || null, dueDate: str(f, "dueDate") || null })).rfx.id; });
+  if (res.error) return res;
+  revalidatePath("/", "layout");
+  redirect(`/rfx/${id}?tab=lines`);
+}
+
+export async function deleteTemplateUI(id: string): Promise<FormState> {
+  return guarded((uid) => deleteTemplate(uid, id), "Template deleted.");
+}
+
+export async function savePrefsUI(_: FormState, f: FormData): Promise<FormState> {
+  return guarded(async (uid) => {
+    const prefs = readPrefs({ numberFormat: str(f, "numberFormat"), dateFormat: str(f, "dateFormat"), timeZone: str(f, "timeZone") });
+    await q("update users set prefs = $2::jsonb where id = $1", [uid, JSON.stringify(prefs)]);
+  }, "Preferences saved.");
 }

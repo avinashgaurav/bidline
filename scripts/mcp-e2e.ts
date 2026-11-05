@@ -205,7 +205,16 @@ async function main() {
     check("archive_rfx archives the copy", /archived/.test(await call("archive_rfx", { rfx: copyCode, archive: true, reason: "e2e" })));
     check("archive_rfx restores it", /restored/.test(await call("archive_rfx", { rfx: copyCode, archive: false })));
     const toolCount = (await client.listTools()).tools.length;
-    check("all 51 tools are offered to an admin", toolCount === 51, `${toolCount}`);
+    // Checklist, GSTIN, team, templates.
+    check("check_ready lists the checklist", /required|ready to send/.test(await call("check_ready", { rfx: copyCode })));
+    check("check_gstin checks a GSTIN", /valid format/.test(await call("check_gstin", { gstin: "27AAPFU0939F1ZV" })));
+    check("check_gstin flags a wrong check digit", /invalid/.test(await call("check_gstin", { gstin: "27AAPFU0939F1ZA" })));
+    check("list_team lists the workspace", /Admin/.test(await call("list_team", {})));
+    check("save_template saves the event", /Saved the template/.test(await call("save_template", { rfx: code, name: "e2e template" })));
+    check("list_templates shows it", /e2e template/.test(await call("list_templates", {})));
+    check("create_rfx_from_template creates an event", /from the template/.test(await call("create_rfx_from_template", { template: "e2e template", title: "e2e from template" })));
+    check("issue_rfx refuses an unready event", /checklist|unclear|Not issued/.test(await call("issue_rfx", { rfx: copyCode })));
+    check("all 57 tools are on for an admin (decide_award stays off until switched on)", toolCount === 57, `${toolCount}`);
 
     await call("get_line", { rfx: "RFX-0000-0000", lineNo: 1 }, true);
     const bad = await fetch(`${BASE}/mcp/bl_not_a_real_token`, { method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }) });

@@ -7,12 +7,13 @@ import { sendMail } from "./mail";
  * mailbox to their own address, so nothing leaves through a third party.
  */
 export const NOTIFY_KINDS: Array<{ key: NotifyKind; label: string; help: string; default: boolean }> = [
+  { key: "mentioned", label: "Someone mentions me with @", help: "In a comment on a price or a note on a line.", default: true },
   { key: "award_waiting", label: "An award is waiting for my approval", help: "Approvers and admins.", default: true },
   { key: "award_decided", label: "An award I drafted was decided", help: "Approved, rejected, sent back or expired.", default: true },
   { key: "quote_read", label: "Claude read a quote on my event", help: "One email per document read.", default: false },
   { key: "followup_overdue", label: "A supplier missed a reply-by date", help: "Once a day, with the daily reminders.", default: false },
 ];
-export type NotifyKind = "award_waiting" | "award_decided" | "quote_read" | "followup_overdue";
+export type NotifyKind = "award_waiting" | "award_decided" | "quote_read" | "followup_overdue" | "mentioned";
 
 export function readNotify(raw: unknown): Record<NotifyKind, boolean> {
   const r = (raw ?? {}) as Partial<Record<NotifyKind, boolean>>;

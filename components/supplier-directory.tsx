@@ -5,12 +5,14 @@ import { useMemo, useState } from "react";
 import { ChevronDown, Search } from "lucide-react";
 import type { DirectoryRow } from "@/lib/directory";
 import { STAGE } from "@/lib/stages";
-import { inrCompact } from "@/components/count-up";
+import { moneyShort } from "@/lib/prefs";
+import { usePrefs } from "@/components/prefs-provider";
 import { InfoTip } from "@/components/tip";
 
 /** Every supplier you have asked to quote, across events, with how reliable they have been. */
 export function SupplierDirectory({ rows }: { rows: DirectoryRow[] }) {
   const [text, setText] = useState("");
+  const prefs = usePrefs();
   const [open, setOpen] = useState<string | null>(null);
   const shown = useMemo(() => {
     const t = text.trim().toLowerCase();
@@ -53,7 +55,7 @@ export function SupplierDirectory({ rows }: { rows: DirectoryRow[] }) {
                     <span className="h-1 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full bg-primary" style={{ width: `${rate}%` }} /></span>
                   </span>
                   <span className="num text-[13px]">{r.lines_won}</span>
-                  <span className="num text-[13px]">{r.won_inr ? inrCompact(r.won_inr) : <span className="text-ink-secondary">n/a</span>}</span>
+                  <span className="num text-[13px]">{r.won_inr ? moneyShort(r.won_inr, prefs) : <span className="text-ink-secondary">n/a</span>}</span>
                   <span className={`num text-[13px] ${r.corrections ? "text-warning" : "text-ink-secondary"}`}>{r.corrections}</span>
                   <ChevronDown className={`hidden size-4 text-ink-secondary transition lg:block ${isOpen ? "rotate-180" : ""}`} />
                 </button>

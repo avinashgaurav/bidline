@@ -115,7 +115,7 @@ export function CommandMenu() {
             {busy ? <Loader2 className="size-4 animate-spin text-ink-secondary" /> : <Search className="size-4 text-ink-secondary" />}
             <input autoFocus role="combobox" aria-expanded="true" aria-controls="cmdk-list" aria-activedescendant={results[sel] ? `cmdk-${sel}` : undefined} aria-label="Search Bidline" value={text} onChange={(e) => { setText(e.target.value); setSel(0); if (e.target.value.trim().length < 2) setHits([]); }} onKeyDown={onKeyDown}
               placeholder="Search events, suppliers, documents, line items or pages"
-              className="h-13 flex-1 bg-transparent py-4 text-[15px] outline-none placeholder:text-ink-secondary/70" />
+              className="h-13 flex-1 bg-transparent py-4 text-[15px] outline-none placeholder:text-ink-secondary/70 focus:outline-none focus-visible:outline-none" />
             <kbd className="rounded bg-muted px-1.5 text-[11px] text-ink-secondary">Esc</kbd>
           </div>
           <div ref={list} id="cmdk-list" className="max-h-[56vh] overflow-y-auto p-2" role="listbox" aria-label="Results">
@@ -152,8 +152,8 @@ export function CommandMenu() {
 export function SearchButton() {
   return (
     <button onClick={openCommandMenu}
-      className="flex h-9 w-full max-w-[440px] items-center gap-2.5 rounded-lg bg-muted/70 px-3 text-[13.5px] text-ink-secondary ring-1 ring-border transition-colors hover:bg-muted hover:text-foreground">
-      <Search className="size-4" /> <span className="truncate">Search events, suppliers, documents</span>
+      className="flex h-10 w-full items-center gap-2.5 rounded-xl bg-card px-4 text-[14px] text-ink-secondary ring-1 ring-border transition-colors hover:ring-primary/40 hover:text-foreground">
+      <Search className="size-4" /> <span className="truncate">Search events, suppliers, documents and line items</span>
       <kbd className="ml-auto hidden rounded bg-card px-1.5 text-[11px] ring-1 ring-border sm:inline">⌘K</kbd>
     </button>
   );

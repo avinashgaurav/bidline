@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { spend } from "@/lib/analytics";
-import { inrShort } from "@/lib/view";
 import { CountUp } from "@/components/count-up";
 import { InfoTip } from "@/components/tip";
 import { BarList } from "@/components/bar-list";
@@ -45,7 +44,7 @@ export default async function AnalyticsPage() {
             <BarList rows={s.bySupplier.map((x) => ({ label: x.supplier, value: x.awarded, meta: `${x.lines} lines · ${x.events} event${x.events === 1 ? "" : "s"}` }))} />
           </Card>
           <Card title="By event" note="Budget for the whole event, and the approved award where there is one.">
-            <BarList rows={s.byEvent.filter((e) => e.budget || e.awarded).map((e) => ({ label: `${e.code} ${e.title}`, value: e.awarded ?? 0, ref: e.budget, meta: e.awarded === null ? "No award yet" : `${inrShort(e.awarded)} awarded`, href: `/rfx/${e.id}?tab=overview` }))} />
+            <BarList rows={s.byEvent.filter((e) => e.budget || e.awarded).map((e) => ({ label: `${e.code} ${e.title}`, value: e.awarded ?? 0, ref: e.budget, meta: e.awarded === null ? "No award yet" : "Awarded", href: `/rfx/${e.id}?tab=overview` }))} />
           </Card>
           <Card title="By month approved" note="Awarded value per month, with the budget for those lines.">
             <BarList rows={s.byMonth.map((m) => ({ label: new Date(`${m.month}-01`).toLocaleDateString("en-IN", { month: "short", year: "numeric" }), value: m.awarded, ref: m.baseline, meta: `${m.awards} award${m.awards === 1 ? "" : "s"}` }))} />

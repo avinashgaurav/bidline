@@ -1,5 +1,6 @@
 "use client";
 
+import { EditedTag, type Edit } from "@/components/edited-tag";
 import { useActionState, useTransition } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,7 @@ import { Field, FormMessage, SubmitButton, fieldClass } from "@/components/form-
 
 type Line = { no: number; sku: string; group: string; desc: string; uom: string; pack_size: number; qty: number; baseline_inr: number };
 
-export function LineRow({ rfxId, line, flagged }: { rfxId: string; line: Line; flagged: string | null }) {
+export function LineRow({ rfxId, line, flagged, edits }: { rfxId: string; line: Line; flagged: string | null; edits?: Edit[] }) {
   const [state, action] = useActionState<FormState, FormData>(saveLineUI.bind(null, rfxId), {});
   const [removing, startRemove] = useTransition();
   return (
@@ -20,6 +21,7 @@ export function LineRow({ rfxId, line, flagged }: { rfxId: string; line: Line; f
       <div className="grid gap-1">
         <input name="description" defaultValue={line.desc} className={`${fieldClass} h-8 text-xs`} aria-label="Description" />
         {flagged ? <span className="text-xs text-warning">{flagged}</span> : null}
+        <EditedTag edits={edits} label={`line ${line.no}`} />
         <FormMessage state={state} />
       </div>
       <input name="uom" defaultValue={line.uom} className={`${fieldClass} h-8 text-xs`} aria-label="Unit" />

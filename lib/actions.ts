@@ -18,6 +18,8 @@ import { can, deniedMessage, type Perm } from "./roles";
 import { awardForToken, createSteps, decideStep } from "./approvals";
 import { getSettings, overLimit } from "./workspace";
 import { approversOf, notify } from "./notify";
+import { blocking, readiness } from "./readiness";
+import { handleMentions } from "./mentions";
 import { expireStaleAwards } from "./expiry";
 import { announce } from "./channels";
 
@@ -186,9 +188,13 @@ export async function addQuestionsAction(ctx: ActionCtx, rfxRef: string | null |
  */
 export async function issueRfxAction(ctx: ActionCtx, rfxRef: string | null | undefined, overrideReason?: string | null) {
   const rfx = await rfxFor(ctx, rfxRef);
-  const gate = qualityGate(await getLines(rfx.id));
+  const [lines, suppliers, questions] = await Promise.all([getLines(rfx.id), getSuppliers(rfx.id), getQuestions(rfx.id)]);
+  const gate = qualityGate(lines);
+  const checks = readiness({ rfx, lines, suppliers, questions, gate });
+  const missing = blocking(checks);
+  if (missing.length) return { issued: false, rfx, gate, missing };
   if (gate.length && !overrideReason?.trim()) {
-    return { issued: false, rfx, gate };
+    return { issued: false, rfx, gate, missing };
   }
   await q(
     `update rfx set status = case when status = 'draft' then 'issued' else status end,
@@ -199,7 +205,7 @@ export async function issueRfxAction(ctx: ActionCtx, rfxRef: string | null | und
   await log(ctx, rfx.id, "rfx_issued",
     `Issued ${rfx.code} to its suppliers${gate.length ? `, overriding ${gate.length} quality warning${gate.length === 1 ? "" : "s"}: "${overrideReason}"` : ""}. Delivery is recorded, not sent.`,
     { gate });
-  return { issued: true, rfx: await rfxFor(ctx, rfx.id), gate };
+  return { issued: true, rfx: await rfxFor(ctx, rfx.id), gate, missing: [] as typeof missing };
 }
 
 // ---------------------------------------------------------------------------
@@ -918,7 +924,7 @@ export async function decideAwardInAppAction(ctx: ActionCtx, rfxRef: string, awa
   if (award.status !== "sent") throw new BadInput(`This award is ${award.status.replace(/_/g, " ")}, so it no longer takes a decision.`);
   if (await decideStep({
     awardId, token: null, decision, name: me?.name ?? "Approver", note: note ?? null, decider: { userId: ctx.userId, email: me?.email ?? null },
-    log: { userId: ctx.userId, actor: "user", rfxId: rfx.id, code: rfx.code },
+    log: { userId: ctx.userId, actor: ctx.actor === "claude" ? "claude" : "user", rfxId: rfx.id, code: rfx.code, tool: ctx.tool ?? null, userRequest: ctx.userRequest ?? null },
   })) return;
   const done = await q(
     `update awards set status = $3, decided_by = $4, decided_at = now(), decision_note = $5 where id = $1 and rfx_id = $2 and status = 'sent' returning id`,
@@ -929,7 +935,7 @@ export async function decideAwardInAppAction(ctx: ActionCtx, rfxRef: string, awa
   await announce(rfx.id, "award_decided", `${me?.name ?? "The approver"} decided the award on ${rfx.code}: ${decision.replace("_", " ")}.`);
   if (award.drafted_by_user && award.drafted_by_user !== ctx.userId) await notify([award.drafted_by_user], "award_decided", `award ${decision.replace("_", " ")} on ${rfx.code}`, `${me?.name ?? "The approver"} decided the award on ${rfx.code}: ${decision.replace("_", " ")}${note ? `, "${note}"` : "."}`);
   await log(ctx, rfx.id, "award_decided",
-    `${me?.name ?? "Approver"} ${decision === "approved" ? "approved" : decision === "rejected" ? "rejected" : "asked for changes to"} the award on ${rfx.code} in the app${note ? `: "${note}"` : "."}`,
+    `${me?.name ?? "Approver"} ${decision === "approved" ? "approved" : decision === "rejected" ? "rejected" : "asked for changes to"} the award on ${rfx.code} ${ctx.actor === "claude" ? "through Claude" : "in the app"}${note ? `: "${note}"` : "."}`,
     { awardId, decision, note: note ?? null });
 }
 
@@ -1005,6 +1011,7 @@ export async function addLineNoteAction(ctx: ActionCtx, rfxRef: string | null | 
   const id = newId("note");
   await q(`insert into line_notes (id, rfx_id, line_no, text, actor) values ($1,$2,$3,$4,$5)`, [id, rfx.id, lineNo, body.slice(0, 2000), ctx.actor]);
   await log(ctx, rfx.id, "line_note_added", `Note on line ${lineNo} (${line.desc}): "${body.slice(0, 300)}"`, { lines: [lineNo] });
+  await handleMentions({ userId: ctx.userId, rfx, text: body, where: `a note on line ${lineNo}`, link: `/rfx/${rfx.id}?tab=lines` });
   return { rfx, id, line };
 }
 
@@ -1033,6 +1040,7 @@ export async function addCellCommentAction(ctx: ActionCtx, input: { rfx?: string
     [id, rfx.id, supplier.id, input.lineNo, body.slice(0, 2000), ctx.userId, ctx.actor]);
   await log(ctx, rfx.id, "cell_commented", `Commented on ${supplier.code} line ${input.lineNo}: "${body.slice(0, 140)}"`,
     { cell: cellKey(supplier.code, input.lineNo), note: body.slice(0, 500) });
+  await handleMentions({ userId: ctx.userId, rfx, text: body, where: `a comment on ${supplier.code} line ${input.lineNo}`, link: `/rfx/${rfx.id}?tab=comparison` });
   return { rfx, supplier, id };
 }
 

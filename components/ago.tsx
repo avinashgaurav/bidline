@@ -1,6 +1,8 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { date, time } from "@/lib/prefs";
+import { usePrefs } from "@/components/prefs-provider";
 
 const subscribe = (l: () => void) => {
   const id = setInterval(l, 60_000);
@@ -17,7 +19,9 @@ export function agoText(iso: string, now = Date.now()): string {
 
 /** "5 min ago" for the last day, then the date; the exact time on hover. Updates each minute. */
 export function Ago({ iso }: { iso: string }) {
+  const prefs = usePrefs();
   const now = useSyncExternalStore(subscribe, () => Math.floor(Date.now() / 60_000), () => 0);
-  const text = now ? agoText(iso, now * 60_000) : new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-  return <time dateTime={iso} title={new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "medium" })}>{text}</time>;
+  const recent = now && now * 60_000 - new Date(iso).getTime() < 86_400_000;
+  const text = recent ? agoText(iso, now * 60_000) : date(iso, prefs);
+  return <time dateTime={iso} title={`${date(iso, prefs)}, ${time(iso, prefs, true)} (${prefs.timeZone})`}>{text}</time>;
 }

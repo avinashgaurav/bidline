@@ -9,8 +9,8 @@ import { ClaudeMark } from "@/components/claude-mark";
 const CLAUDE_GUIDE = "https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp";
 
 /** Step two of the first run: connect Claude. Watches for the first call and shows it landing. */
-export function ConnectStep({ url, connected, onConnected, onSkip, onContinue }: {
-  url: string; connected: boolean; onConnected: () => void; onSkip: () => void; onContinue: () => void;
+export function ConnectStep({ url, connected, onConnected, onSkip, onContinue, stepLabel }: {
+  url: string; connected: boolean; onConnected: () => void; onSkip: () => void; onContinue: () => void; stepLabel?: string | null;
 }) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
@@ -44,9 +44,9 @@ export function ConnectStep({ url, connected, onConnected, onSkip, onContinue }:
   };
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-7">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-5">
       <div className="flex items-center justify-center gap-3" aria-hidden>
-        <span className="grid size-14 place-items-center rounded-2xl bg-lavender"><Mark size={34} /></span>
+        <span className="grid size-11 place-items-center rounded-xl bg-lavender"><Mark size={26} /></span>
         <svg width="112" height="14" viewBox="0 0 112 14" className="overflow-visible">
           <line x1="4" y1="7" x2="108" y2="7" strokeWidth="2" strokeLinecap="round"
             className={connected ? "stroke-success transition-[stroke] duration-500" : "stroke-fog motion-safe:animate-[dash_1.1s_linear_infinite]"}
@@ -58,21 +58,21 @@ export function ConnectStep({ url, connected, onConnected, onSkip, onContinue }:
             </g>
           ) : null}
         </svg>
-        <span className="grid size-14 place-items-center rounded-2xl bg-[#F6EEE8]"><ClaudeMark className="size-8" /></span>
+        <span className="grid size-11 place-items-center rounded-xl bg-[#F6EEE8]"><ClaudeMark className="size-6" /></span>
       </div>
 
       <div className="text-center">
-        <p className="text-[12px] font-medium tracking-[0.06em] text-ink-secondary uppercase">Step 2 of 2</p>
-        <h2 id="onboarding-title" className="mt-1.5 text-[26px] leading-tight">{connected ? "Claude is connected" : "Connect your Claude"}</h2>
-        <p className="mx-auto mt-2 max-w-[44ch] text-[16px] text-ink-secondary">
+        {stepLabel ? <p className="text-[12px] font-medium tracking-[0.06em] text-ink-secondary uppercase">{stepLabel}</p> : null}
+        <h2 id="onboarding-title" className="mt-1 text-[22px] leading-tight">{connected ? "Claude is connected" : "Connect your Claude"}</h2>
+        <p className="mx-auto mt-1.5 max-w-[44ch] text-[14px] text-ink-secondary">
           {connected
             ? "Your Claude can now read supplier quotes into Bidline. Every price it reads appears here, ready to check."
-            : "Bidline has no AI of its own. Your Claude reads each supplier file and sends the prices here; Bidline checks them, compares them and keeps the record. Takes about a minute."}
+            : "Your Claude reads the supplier files; Bidline compares and keeps the record. About a minute."}
         </p>
       </div>
 
       {!connected ? (
-        <ol className="grid gap-5">
+        <ol className="grid gap-3.5">
           <Step n={1} title="Copy your private connector link">
             <div className="mt-2 flex items-center gap-2">
               <code className="min-w-0 flex-1 truncate rounded-lg bg-muted px-3 py-2 text-[12px] text-ink-secondary">{url}</code>
@@ -82,14 +82,14 @@ export function ConnectStep({ url, connected, onConnected, onSkip, onContinue }:
             </div>
           </Step>
           <Step n={2} title="Add it to Claude as a custom connector">
-            <p className="mt-1 text-sm text-ink-secondary">In Claude, open Settings, then Connectors, then <b className="font-medium text-foreground">Add custom connector</b>. Name it Bidline and paste the link. On Claude Team or Enterprise, an Owner adds it under Organization settings.</p>
-            <div className="mt-2 flex flex-wrap gap-3 text-sm">
+            <p className="mt-0.5 text-[13px] text-ink-secondary">Claude Settings, Connectors, <b className="font-medium text-foreground">Add custom connector</b>. Name it Bidline and paste the link.</p>
+            <div className="mt-1 flex flex-wrap gap-3 text-[13px]">
               <a href="https://claude.ai/settings/connectors" target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">Open Claude settings <ExternalLink className="size-3.5" /></a>
               <a href={CLAUDE_GUIDE} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-ink-secondary hover:text-primary hover:underline">Claude&apos;s guide to connectors <ExternalLink className="size-3.5" /></a>
             </div>
           </Step>
           <Step n={3} title="Turn Bidline on in a chat">
-            <p className="mt-1 text-sm text-ink-secondary">In a new chat, switch Bidline on from the tools menu and ask: &ldquo;What can Bidline do?&rdquo;</p>
+            <p className="mt-0.5 text-[13px] text-ink-secondary">In a new chat, switch Bidline on and ask &ldquo;What can Bidline do?&rdquo;</p>
           </Step>
         </ol>
       ) : null}

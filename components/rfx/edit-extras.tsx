@@ -1,8 +1,9 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { Copy, Trash2, Undo2 } from "lucide-react";
-import { addLineNoteUI, duplicateRfxUI, removeQuestionUI, withdrawAwardUI, type FormState } from "@/app/actions";
+import { Copy, LayoutTemplate, Trash2, Undo2 } from "lucide-react";
+import { MentionTextarea } from "@/components/mention-textarea";
+import { addLineNoteUI, saveTemplateUI, duplicateRfxUI, removeQuestionUI, withdrawAwardUI, type FormState } from "@/app/actions";
 import { FormMessage, SubmitButton, fieldClass } from "@/components/form-bits";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
@@ -86,9 +87,29 @@ export function AddLineNote({ rfxId, lines }: { rfxId: string; lines: Array<{ no
       <select name="lineNo" className={`${fieldClass} w-auto max-w-[260px]`} aria-label="Line">
         {lines.map((l) => <option key={l.no} value={l.no}>Line {l.no}: {l.desc.slice(0, 40)}</option>)}
       </select>
-      <input name="text" required placeholder="e.g. Confirm the warranty terms with Vector before award" className={`${fieldClass} min-w-[240px] flex-1`} aria-label="Note" />
+      <div className="min-w-[240px] flex-1"><MentionTextarea rfxId={rfxId} name="text" rows={1} placeholder="e.g. @Asha confirm the warranty with Vector before award" /></div>
       <SubmitButton variant="secondary">Add note</SubmitButton>
       <FormMessage state={state} />
     </form>
+  );
+}
+
+export function SaveTemplateButton({ rfxId, title }: { rfxId: string; title: string }) {
+  const [open, setOpen] = useState(false);
+  const [state, action] = useActionState<FormState, FormData>(saveTemplateUI.bind(null, rfxId), {});
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] ring-1 ring-border hover:bg-muted"><LayoutTemplate className="size-3.5" /> Save as template</DialogTrigger>
+      <DialogContent className="sm:max-w-[440px]">
+        <DialogTitle className="text-[18px] font-medium">Save as a template</DialogTitle>
+        <DialogDescription className="text-[13px] text-ink-secondary">Keeps the line items and questions, so the next purchase of this kind starts ready. Suppliers and quotes are not copied.</DialogDescription>
+        <form action={action} className="grid gap-3">
+          <label className="grid gap-1.5 text-sm"><span className="text-ink-secondary">Template name</span>
+            <input name="name" defaultValue={title} className={fieldClass} /></label>
+          <FormMessage state={state} />
+          <div><SubmitButton>Save template</SubmitButton></div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

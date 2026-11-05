@@ -50,7 +50,7 @@ export function LiveRefresh({ initial }: { initial: number }) {
   if (!note) return null;
   return (
     <div role="status" aria-live="polite"
-      className="fixed right-4 bottom-4 z-40 flex max-w-[380px] items-start gap-3 rounded-xl bg-night px-4 py-3 text-[13px] text-on-dark shadow-[0_18px_40px_-14px_rgba(23,23,33,0.5)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2">
+      className="fixed right-5 bottom-24 z-40 flex max-w-[380px] items-start gap-3 rounded-xl bg-night px-4 py-3 text-[13px] text-on-dark shadow-[0_18px_40px_-14px_rgba(23,23,33,0.5)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2">
       <RefreshCw className="mt-0.5 size-3.5 shrink-0 text-fog" />
       <span className="min-w-0">
         <span className="font-medium">{note.who} just made a change.</span>

@@ -19,6 +19,9 @@ export const KIND_LABEL: Record<string, string> = {
   todo_assigned: "Assigned a to-do",
   todo_snoozed: "Snoozed a to-do",
   rfx_starred: "Starred an event",
+  template_saved: "Saved a template",
+  template_deleted: "Deleted a template",
+  mentioned: "Mentioned someone",
   settings_changed: "Changed workspace settings",
   audit_exported: "Exported the audit log",
   lines_changed: "Changed line items",
@@ -66,7 +69,7 @@ export const kindLabel = (k: string) => KIND_LABEL[k] ?? k.replace(/_/g, " ").re
 
 /** Groups for the audit filters. */
 export const KIND_GROUPS: Array<{ key: string; label: string; kinds: string[] }> = [
-  { key: "event", label: "Event set-up", kinds: ["rfx_created", "rfx_updated", "rfx_issued", "rfx_duplicated", "rfx_copied", "demo_loaded", "rfx_archived", "rfx_restored", "todo_assigned", "todo_snoozed", "lines_changed", "lines_removed", "line_note_added", "questions_changed", "questions_removed"] },
+  { key: "event", label: "Event set-up", kinds: ["rfx_created", "rfx_updated", "rfx_issued", "rfx_duplicated", "rfx_copied", "demo_loaded", "rfx_archived", "rfx_restored", "todo_assigned", "todo_snoozed", "template_saved", "template_deleted", "lines_changed", "lines_removed", "line_note_added", "questions_changed", "questions_removed"] },
   { key: "supplier", label: "Suppliers", kinds: ["supplier_added", "suppliers_added", "supplier_updated"] },
   { key: "document", label: "Documents", kinds: ["document_uploaded", "document_saved", "document_updated"] },
   { key: "quote", label: "Quotes and prices", kinds: ["quote_read", "second_read", "questionnaire_read", "cell_corrected", "correction_undone", "correction_superseded", "assumption_changed", "unmapped_resolved", "cell_commented"] },

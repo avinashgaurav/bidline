@@ -1,16 +1,21 @@
+import type { Edit } from "@/components/edited-tag";
 import type { Comparison } from "@/lib/comparison";
 import type { GateIssue, LineNote } from "@/lib/rfx";
 import { ClaudeMark } from "@/components/claude-mark";
 import { AddLine, HeaderForm, IssueForm, LineRow } from "./lines-client";
 import { AddLineNote } from "./edit-extras";
+import { ReadyChecklist } from "./ready-checklist";
+import { readiness } from "@/lib/readiness";
 
-export function LinesTab({ cmp, gate, notes, buyerName }: { cmp: Comparison; gate: GateIssue[]; notes: LineNote[]; buyerName: string }) {
+export function LinesTab({ cmp, gate, notes, buyerName, edits = {} }: { cmp: Comparison; gate: GateIssue[]; notes: LineNote[]; buyerName: string; edits?: Record<string, Edit[]> }) {
   const r = cmp.rfx;
   const approver = (r.approver ?? {}) as { name?: string; email?: string };
   const flagged = new Map(gate.map((g) => [g.lineNo, `${g.issue}. Fix: ${g.fix}`]));
   const lastGroup = cmp.lines.at(-1)?.group ?? "";
+  const checks = readiness({ rfx: r, lines: cmp.lines, suppliers: cmp.suppliers, questions: cmp.questions, gate });
   return (
     <div className="grid gap-4">
+      {r.status === "draft" || checks.some((c) => c.required && !c.ok) ? <ReadyChecklist rfxId={r.id} checks={checks} issued={Boolean(r.issued_at)} /> : null}
       <details className="group rounded-xl bg-card ring-1 ring-border" open={!cmp.lines.length}>
         <summary className="flex cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 sm:px-5">
           <span className="text-[15px] font-medium">Event details</span>
@@ -38,7 +43,7 @@ export function LinesTab({ cmp, gate, notes, buyerName }: { cmp: Comparison; gat
             <div className="grid grid-cols-[40px_110px_1fr_120px_70px_80px_110px_auto] gap-2 bg-[var(--grid-head)] px-4 py-2 text-xs text-ink-secondary">
               <span>#</span><span>SKU</span><span>Item and specification</span><span>Unit</span><span>Pack size</span><span>Qty</span><span>Budget ₹/unit</span><span />
             </div>
-            {cmp.lines.map((l) => <LineRow key={l.no} rfxId={r.id} line={l} flagged={flagged.get(l.no) ?? null} />)}
+            {cmp.lines.map((l) => <LineRow key={l.no} rfxId={r.id} line={l} flagged={flagged.get(l.no) ?? null} edits={edits[`line:${l.no}`]} />)}
             <AddLine rfxId={r.id} group={lastGroup} />
           </div>
         </div>
