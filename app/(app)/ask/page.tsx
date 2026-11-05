@@ -27,8 +27,9 @@ export default async function AskPage({ searchParams }: { searchParams: Promise<
             <span className="text-ink-secondary">Sourcing event:</span>
             {events.map((e) => (
               <Link key={e.id} href={`/ask?event=${e.id}`}
-                className={`rounded-full px-3 py-1.5 ${e.id === current.id ? "bg-primary text-white" : "bg-secondary hover:bg-lavender"}`}>
-                <span className="num">{e.code}</span> <span className="opacity-80">{e.title.slice(0, 32)}</span>
+                title={e.title}
+                className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-3 py-1.5 ${e.id === current.id ? "bg-primary text-white" : "bg-secondary hover:bg-lavender"}`}>
+                <span className="num shrink-0">{e.code}</span> <span className="max-w-[260px] truncate opacity-80">{e.title}</span>
               </Link>
             ))}
           </div>
