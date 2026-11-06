@@ -1,5 +1,7 @@
 # How Bidline is used
 
+[Back to README](../README.md) · See also: [Features](FEATURES.md)
+
 Claude reads; Bidline keeps the record, does the maths and gets the award approved.
 
 ## Who is involved
@@ -12,11 +14,11 @@ Claude reads; Bidline keeps the record, does the maths and gets the award approv
 | Claude (the buyer's own) | Reads supplier files and does work when asked, through Bidline's tools, as the buyer and with the buyer's role. |
 | Suppliers | Change nothing. They keep replying by email, WhatsApp or file. |
 
-## First time (about 3 minutes)
+## First time (a few minutes)
 
-1. **Sign in.** Bidline asks one question: use demo data or your own files?
+1. **Sign in.** A new Buyer or Admin is asked one question: use demo data or your own files?
 2. **Demo data** loads three fictional events. **Own files** offers three ways to start: tell Claude, fill a short form, or use a template.
-3. **Connect Claude.** Copy your private link (popup or Ask Claude), add it in Claude as a custom connector, and switch Bidline on in a chat.
+3. **Connect Claude.** After the demo a popup offers it (skippable); the link is always on Ask Claude. Copy it, add it in Claude as a custom connector, and switch Bidline on in a chat.
 4. **Home** opens: what needs attention, quotes due, savings, and your own to-dos.
 
 ## One sourcing event, start to finish
@@ -28,11 +30,11 @@ Claude reads; Bidline keeps the record, does the maths and gets the award approv
 | 3. Read | Claude | "Read every unread supplier document and submit the quotes." Each price arrives with the supplier's exact words. |
 | 4. Compare | Bidline | Units, packs, currency and warranty are converted in code. Unusual prices are flagged; doubtful ones stay out of totals. |
 | 5. Check | Buyer | Clicks a price to see its source, corrects it with a reason, comments or @mentions a colleague. |
-| 6. Chase | Buyer or Claude | Follow-ups list what each supplier still owes and send from the buyer's own mailbox. Reminders go out automatically. |
+| 6. Chase | Buyer or Claude | Follow-ups list what each supplier still owes and send from the buyer's own mailbox. Optional automatic reminders, once an admin switches them on. |
 | 7. Award | Buyer, then approver | Bidline prices the options; the buyer drafts the award and sends one approval link. Steps by value apply. |
 | 8. Record | Bidline | Every change is in a sealed audit log, tagged Claude or Person. Export to Excel any time. |
 
-## A day with Bidline
+## A day with Bidline (illustrative; timings are targets to measure in pilots)
 
 | Time | What the buyer does | Before Bidline | With Bidline |
 |---|---|---|---|

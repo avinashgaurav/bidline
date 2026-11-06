@@ -1,13 +1,15 @@
 # Bidline features
 
+[Back to README](../README.md) · See also: [How Bidline is used](USER-FLOW.md)
+
 What Bidline does, feature by feature. Everything here is live at https://bidline-app.vercel.app. Bidline has no AI inside: the customer's own Claude does the reading over MCP.
 
 ## Getting started
 
 | Feature | What it does |
 |---|---|
-| First run | Asks each new person once: use demo data or your own files. Then asks them to connect Claude, then opens the dashboard. |
-| Demo data | Three fictional sourcing events: IT hardware with 12 quote files to read, office furniture already awarded, and housekeeping supplies in progress. |
+| First run | Asks each new Buyer or Admin once: use demo data or your own files. After the demo it offers to connect Claude (skippable), then opens the dashboard. |
+| Demo data | Three fictional sourcing events: IT hardware with 12 supplier files to read, office furniture already awarded, and housekeeping supplies in progress. |
 | New sourcing event | Start one three ways: describe it to Claude, fill in a short form, or reuse a saved template. |
 
 ## Claude
@@ -27,12 +29,12 @@ What Bidline does, feature by feature. Everything here is live at https://bidlin
 | Line items, suppliers, questions | What you are buying, who is quoting, and the questions each supplier must answer. |
 | Ready-to-send checklist | Shows what is missing (due date, suppliers, emails, lines) before the event goes out. |
 | Documents | Upload quotes in any format: Excel, PDF, Word, email, photos. Grouped by supplier; Claude reads them. |
-| Compare quotes | Puts every price on the same basis: units, pack sizes, currency, warranty and earlier order rates are converted in code. Doubtful prices stay out of totals. |
+| Compare quotes | Puts every price on the same basis: units, pack sizes, currency and warranty are converted in code, and prices are compared against earlier order rates. Doubtful prices stay out of totals. |
 | Trace a price | Click any price to see the supplier's own words, where they appear and each conversion step. |
 | Edit with a record | Correct any price with a reason. The original is kept, and every change is tagged Claude or Person. |
 | Unusual price flags | Marks prices far above or below the others. |
 | Comments and @mentions | Discuss a price with your team; a mentioned person is notified. |
-| Follow-ups | What each supplier still owes and the money at stake, with the email ready to send from your own mailbox. Automatic reminders, up to three. |
+| Follow-ups | What each supplier still owes and the money at stake, with the email ready to send from your own mailbox. Automatic reminders, up to three per follow-up, once an admin switches them on. |
 | Award and approval | Compares award options, drafts the award and sends one approval link. Approval steps by value, a limit on one supplier's share, no approving your own award, and requests that expire. |
 | Export, archive, templates | Download to Excel, archive and restore, save an event as a template, star an event, or restrict it to named people. |
 | GSTIN check | Checks a supplier's GSTIN format offline. A live status check is planned. |
@@ -55,7 +57,7 @@ What Bidline does, feature by feature. Everything here is live at https://bidlin
 | Feature | What it does |
 |---|---|
 | Workspaces and roles | Admin, Buyer, Approver and Viewer. Invite people by link; restrict an event to named people. |
-| Admin settings | Team and roles, approval steps and reminders, tool switches, security and data. |
+| Admin settings | Organisation, team and roles, approval steps and reminders, security and data. Tool switches are on the Claude tools page. |
 | Your settings | Profile, preferences (number and date format, time zone), notifications, integrations, API and Claude, and Storage. |
 | Storage | Every supplier file by sourcing event, with file counts and sizes, for the events you can open. |
 | Private files | Files are shown only to people who can open the event. |
