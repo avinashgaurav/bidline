@@ -2,7 +2,7 @@
 
 **Claude reads the supplier quotes. Bidline does the maths, keeps the record and gets it approved.**
 
-Live app: **https://bidline-app.vercel.app** · Built for the Volopay Product & Tech assignment.
+Live app: **https://bidline-app.vercel.app**
 
 | Read | What it covers |
 |---|---|
@@ -25,7 +25,7 @@ Bidline is the system of record around the buyer's own Claude:
 
 ## Try it
 
-1. Sign in at https://bidline-app.vercel.app and create an account (reviewers have a test login).
+1. Sign in at https://bidline-app.vercel.app and create an account.
 2. Answer the first question, "How would you like to start?":
    - **Use demo data:** loads three fictional events: an IT hardware RFQ with 12 supplier files waiting for Claude, office furniture already compared and approved, and housekeeping supplies with quotes partly in and a follow-up overdue.
    - **Use my own files:** tell Claude what you are buying (or fill a short form, or use a template), then upload supplier replies (PDF, Excel, Word, email, photos).
@@ -98,7 +98,7 @@ Every tool accepts an optional `user_request`, the message that led to the call,
 | Hosting, file storage, daily job | Vercel (Next.js, Blob, Cron) |
 | Database | Neon Postgres |
 | Follow-up emails | The buyer's own mailbox over SMTP |
-| Paying the supplier after the award (proposed) | Volopay payables, via a purchase-order export |
+| Paying the supplier after the award (proposed) | The buyer's accounting or payables tool, via a purchase-order export |
 
 ### Built today, and proposed
 
@@ -107,7 +107,7 @@ Every tool accepts an optional `user_request`, the message that led to the call,
 | MCP server with 58 tools (57 on by default; approving an award stays off until an admin switches it on) | Per-user Claude sign-in (OAuth) for Claude Team and Enterprise |
 | Comparison engine, qualification rules, ready-to-send checklist | Gmail and Outlook sign-in that also picks up replies |
 | Workspaces, four roles, invites, restricted events, sealed audit log | WhatsApp follow-ups |
-| Award, approval link, approval steps by value, supplier share limit | Purchase-order export to Tally, Zoho Books, SAP and Volopay |
+| Award, approval link, approval steps by value, supplier share limit | Purchase-order export to Tally, Zoho Books and SAP |
 | Templates, @mentions, notifications, Slack/Teams/webhook alerts | Live GSTIN status from a GST data provider |
 | Email from the buyer's mailbox, optional daily reminders | SSO, data kept in India, custom roles |
 
@@ -179,3 +179,7 @@ npm run test:mcp      # end-to-end through MCP and the database (needs a running
 - `scripts/mcp-e2e.ts`: a scripted MCP client creates the demo enquiry, submits five suppliers' readings, answers questionnaires, corrects and undoes a price, runs a second read, changes an exchange rate, chases, drafts an award and checks the approval page, then confirms all 150 cells after the round trip. It runs against any deployment set in `BIDLINE_URL` and needs `DATABASE_URL` in `.env.local`.
 
 All demo companies, people and prices are fictional.
+
+## License
+
+[MIT](LICENSE)
