@@ -106,7 +106,9 @@ function SidebarBody({ user, workspace, workspaces, events, connected, switchAct
   const adminTab = path === "/settings" ? sp.get("tab") ?? "profile" : null;
   const activeId = path.startsWith("/rfx/") ? path.split("/")[2] : null;
   // Pins belong to one person in one workspace.
-  const [pins, setPins] = usePrefs<string[]>(`bidline:pins:v1:${user.email}:${workspace.name}`, ["view:attention", "audit"]);
+  const [savedPins, setPins] = usePrefs<string[]>(`bidline:pins:v1:${user.email}:${workspace.name}`, ["view:attention", "audit"]);
+  // "Connect Claude" now lives on Ask Claude, so an old pin of it becomes a pin of Ask Claude.
+  const pins = [...new Set(savedPins.map((k) => (k === "connect" ? "ask" : k)))];
   // One section open at a time; the one holding the current page opens itself.
   const [openSec, setOpenSec] = usePrefs<string | null>("bidline:open-section", "sourcing");
   const [drag, setDrag] = useState<number | null>(null);
@@ -131,7 +133,7 @@ function SidebarBody({ user, workspace, workspaces, events, connected, switchAct
     ] },
     { key: "claude", label: "Claude", items: [
       // Ask Claude also holds the connector, so it carries the "not connected" warning.
-      { key: "ask", href: connected ? "/ask" : "/ask#connect", label: "Ask Claude", icon: <ClaudeMark className={ic} color="currentColor" />, active: path.startsWith("/ask"), warn: !connected },
+      { key: "ask", href: "/ask", label: "Ask Claude", icon: <ClaudeMark className={ic} color="currentColor" />, active: path.startsWith("/ask"), warn: !connected },
       { key: "tools", href: "/tools", label: "Tools and integrations", icon: <Wrench className={ic} />, active: path.startsWith("/tools") },
     ] },
     ...(can(user.role, "team") ? [{ key: "admin", label: "Organisation", items: [

@@ -8,7 +8,7 @@ import { EventSelect } from "@/components/event-select";
 import { ConnectCard } from "@/components/connect-card";
 import { EventFilesList } from "@/components/event-files";
 import { appUrlFromHeaders } from "@/lib/app-url";
-import { filesByEvent } from "@/lib/storage";
+import { fileTotalsByEvent } from "@/lib/storage";
 
 export const metadata = { title: "Ask Claude · Bidline" };
 export const maxDuration = 60;
@@ -33,7 +33,7 @@ const EXAMPLES: Array<[string, string[]]> = [
 
 export default async function AskPage({ searchParams }: { searchParams: Promise<{ event?: string }> }) {
   const user = await requireUser();
-  const [events, base, files, sp] = await Promise.all([listRfxs(user.id), appUrlFromHeaders(), filesByEvent(user.id), searchParams]);
+  const [events, base, files, sp] = await Promise.all([listRfxs(user.id), appUrlFromHeaders(), fileTotalsByEvent(user.id), searchParams]);
   const current = events.find((e) => e.id === sp.event) ?? events[0];
   return (
     <div className="mx-auto grid max-w-5xl gap-5">
@@ -52,7 +52,7 @@ export default async function AskPage({ searchParams }: { searchParams: Promise<
       ) : (
         <p className="rounded-xl bg-card p-5 text-sm text-ink-secondary ring-1 ring-border">There are no sourcing events yet. <Link href="/" className="text-primary hover:underline">Start one</Link>, then ask about it here.</p>
       )}
-      <section id="connect" className="scroll-mt-20">
+      <section id="connect" aria-label="Your Claude connector" className="scroll-mt-20">
         <ConnectCard url={`${base}/mcp/${user.mcp_token}`} connectedAt={user.last_mcp_at} />
       </section>
       <section className="rounded-xl bg-card p-4 ring-1 ring-border sm:p-5">

@@ -22,7 +22,7 @@ async function handle(req: Request, { params }: { params: Promise<{ token: strin
   const user = await userByMcpToken(token);
   if (!user) {
     return Response.json(
-      { jsonrpc: "2.0", error: { code: -32001, message: "This Bidline connector link is not valid. Copy a fresh one from the Connect Claude page." }, id: null },
+      { jsonrpc: "2.0", error: { code: -32001, message: "This Bidline connector link is not valid. Copy a fresh one from the Ask Claude page in Bidline." }, id: null },
       { status: 404 },
     );
   }

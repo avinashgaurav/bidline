@@ -2,44 +2,33 @@ import { q } from "./db";
 import { ME_CTE, VISIBLE } from "./rfx";
 
 /**
- * Every stored supplier file, grouped by the sourcing event it belongs to.
+ * Supplier files, by the sourcing event they belong to. The list of events
+ * carries only totals; one event's files are fetched when it is opened.
  * Only events this person can open are included, archived ones last.
  */
-export interface EventFiles {
-  id: string;
-  code: string;
-  title: string;
-  archived: boolean;
-  bytes: number;
-  files: Array<{ id: string; filename: string; kind: string; byteSize: number; supplier: string | null; status: string; createdAt: string }>;
-}
+export interface EventFileTotals { id: string; code: string; title: string; archived: boolean; files: number; bytes: number }
+export interface StoredFile { id: string; filename: string; kind: string; byteSize: number; supplier: string | null; status: string; createdAt: string }
 
-export async function filesByEvent(userId: string): Promise<EventFiles[]> {
-  const rows = await q<{
-    rfx_id: string; code: string; title: string; archived: boolean;
-    id: string; filename: string; kind: string; byte_size: number; supplier: string | null; status: string; created_at: string;
-  }>(
+export async function fileTotalsByEvent(userId: string): Promise<EventFileTotals[]> {
+  return q<EventFileTotals>(
     `with ${ME_CTE}
-     select r.id as rfx_id, r.code, r.title, r.archived_at is not null as archived,
-            d.id, d.filename, d.kind, d.byte_size, s.name as supplier, d.status, d.created_at
-     from rfx r join documents d on d.rfx_id = r.id left join suppliers s on s.id = d.supplier_id, me
+     select r.id, r.code, r.title, r.archived_at is not null as archived, count(d.id)::int as files, coalesce(sum(d.byte_size), 0)::float8 as bytes
+     from rfx r join documents d on d.rfx_id = r.id, me
      where ${VISIBLE}
-     order by r.archived_at is not null, r.updated_at desc, d.created_at`,
+     group by r.id order by r.archived_at is not null, r.created_at desc, r.id`,
     [userId],
   );
-  const byEvent = new Map<string, EventFiles>();
-  for (const r of rows) {
-    let ev = byEvent.get(r.rfx_id);
-    if (!ev) byEvent.set(r.rfx_id, (ev = { id: r.rfx_id, code: r.code, title: r.title, archived: r.archived, bytes: 0, files: [] }));
-    ev.bytes += r.byte_size;
-    ev.files.push({ id: r.id, filename: r.filename, kind: r.kind, byteSize: r.byte_size, supplier: r.supplier, status: r.status, createdAt: r.created_at });
-  }
-  return [...byEvent.values()];
 }
 
-/** 1.2 MB, 340 KB, 12 bytes. */
-export function fileSize(n: number): string {
-  if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
-  return `${n} bytes`;
+export async function filesOfEvent(userId: string, rfxId: string): Promise<StoredFile[]> {
+  return q<StoredFile>(
+    `with ${ME_CTE}
+     select d.id, d.filename, d.kind, d.byte_size as "byteSize", s.name as supplier, d.status, d.created_at as "createdAt"
+     from rfx r join documents d on d.rfx_id = r.id left join suppliers s on s.id = d.supplier_id and s.rfx_id = r.id, me
+     where ${VISIBLE} and r.id = $2
+     order by d.created_at, d.id`,
+    [userId, rfxId],
+  );
 }
+
+export { fileSize } from "./file-size";
