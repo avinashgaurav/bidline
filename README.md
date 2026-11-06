@@ -2,7 +2,16 @@
 
 **Claude reads the supplier quotes. Bidline does the maths, keeps the record and gets it approved.**
 
-Live app: **https://bidline-app.vercel.app**
+Live app: **https://bidline-app.vercel.app** · Built for the Volopay Product & Tech assignment.
+
+| Read | What it covers |
+|---|---|
+| [Features](docs/FEATURES.md) | Every feature and what it does, in plain words |
+| [How it is used](docs/USER-FLOW.md) | Who uses it, the first-time flow, one event start to finish, a day with Bidline |
+| [Architecture](#architecture) | Diagram, data flow, who does what, built versus proposed |
+| [Design system](docs/DESIGN.md) | Colours, type, spacing and components |
+
+**At a glance:** Next.js 16, React 19, Tailwind 4, Neon Postgres, Vercel Blob and Cron, and an MCP server with 58 tools. Checked by a no-AI scan, type and lint checks, a calculator test (150 of 150 prices match a reference snapshot) and an end-to-end test through MCP against the live site.
 
 Bidline is a procurement workspace. Each purchase is a **sourcing event** (an RFQ by default, or an RFP, RFI or tender). A buyer asks three to five suppliers for quotes. The replies come back as a spreadsheet, a PDF, a Word letter, an email and a phone photo of a rate card. Today someone retypes all of it into one sheet before anyone can compare a price, and a "box of 10" priced per piece quietly makes the wrong supplier win.
 
@@ -18,12 +27,12 @@ Bidline is the system of record around the buyer's own Claude:
 ## Try it
 
 1. Sign in at https://bidline-app.vercel.app (test login in the submission email), or create an account.
-2. Connect Claude. On first sign-in a popup walks you through it and confirms "Claude MCP connected" as soon as Claude reaches Bidline. The link is also on the Connect Claude page.
+2. Answer the first question, "How would you like to start?":
+   - **Use demo data:** loads three fictional events: an IT hardware RFQ with 12 supplier files waiting for Claude, office furniture already compared and approved, and housekeeping supplies with quotes partly in and a follow-up overdue.
+   - **Use my own files:** tell Claude what you are buying (or fill a short form, or use a template), then upload supplier replies (PDF, Excel, Word, email, photos).
+3. Connect Claude. The next popup walks you through it and confirms "Claude MCP connected" as soon as Claude reaches Bidline. The link is also on the **Ask Claude** page.
    - **Claude on the web or desktop:** Settings, then Connectors, then *Add custom connector*. Name it Bidline, paste the link, add. In a chat, switch Bidline on from the tools menu.
    - **Claude Code:** `claude mcp add --transport http bidline <your link>`
-3. Answer the first question, "How would you like to start?" (the second asks you to connect Claude):
-   - **Use demo data:** loads three fictional events: an IT hardware RFQ with 12 supplier files waiting for Claude, office furniture already compared and approved, and housekeeping supplies with quotes partly in and a follow-up overdue.
-   - **Use my own files:** tell Claude what you are buying (or fill a short form), then upload supplier replies (PDF, Excel, Word, email, photos).
 4. Ask Claude, for example:
    - "Use Bidline: read every unread supplier document on my latest enquiry and submit what each one says."
    - "In Bidline, what needs my attention before I can compare these quotes?"
@@ -37,17 +46,17 @@ Bidline is the system of record around the buyer's own Claude:
 | Area | What it does |
 |---|---|
 | Home | Organisation dashboard: key figures, pipeline by stage, ways to save, what needs attention, recent activity. A second tab, My work, is the person's own queue; items can be assigned to a teammate or snoozed |
-| Sidebar | Home, Pinned (drag to reorder, starred events), Sourcing (views by stage, suppliers), Insights (spend analytics, audit log), Claude (ask, tools, connection), Organisation (admins), the open event's sections, and an account menu with the organisation and role |
+| Sidebar | Home, Pinned (drag to reorder, starred events), Sourcing (views by stage, suppliers), Insights (spend analytics, audit log), Claude (Ask Claude, tools), Organisation (admins), the open event's sections, and an account menu with the organisation and role |
 | Search and alerts | ⌘K search over events, suppliers, documents and line items; a notification bell; optional email notifications and Slack, Teams or webhook alerts |
 | All events | Views (needs attention, by stage, awaiting approval, archived) with counts, search, owner and sort, all kept in the link |
 | Event page | Steps as tabs with counts (each person can reorder or hide them), a "Next" banner, Star, Access (restrict to named people), Duplicate, Archive, Export, and the audit trail fixed on the right |
 | Teams and roles | Workspaces with Admin, Buyer, Approver and Viewer roles, invites, restricted events. Approvers decide inside the app; nobody approves their own award; requests expire after a set time; extra approval steps above set values; a limit on one supplier's share of an award |
 | Audit log | Organisation-wide and per event, with filters, CSV export and a sealed hash chain that shows any edited or deleted entry. Entries cannot be edited |
-| Suppliers and spend | A supplier directory across events (reply rate, wins, corrections) and spend analytics against budget |
+| Suppliers and spend | A supplier directory across events (reply rate, wins, corrections) and spend analytics against budget, for all events or one |
 | Overview | Charts from the same figures as the grid: price against budget, lines won, quote quality, spend by category (each with a table view) |
 | Audit trail | Side panel: every change on the event, who made it (Claude, the buyer, the approver), when, and the before and after values. Read-only |
-| Ask | Instant answers worked out in code (cheapest, savings against budget, price differences, categories, qualification, what is owed, a line, a supplier); anything else is handed to your Claude |
-| Settings | Profile; your own mailbox for supplier follow-ups (SMTP with an app password, checked before saving, stored encrypted); Claude link; defaults |
+| Ask Claude | Instant answers worked out in code (cheapest, savings against budget, price differences, categories, qualification, what is owed, a line, a supplier); your connector link; questions to ask Claude; every supplier file by event |
+| Settings | Profile; preferences (number and date format, time zone); notifications; your own mailbox for supplier follow-ups (SMTP with an app password, checked before saving, stored encrypted); Claude links; Storage (files and sizes by event); admin tabs for team, approvals and tools |
 | Comparison | Line by supplier grid of landed prices per asked unit. Lowest comparable price highlighted; caveats, prices needing a person and missing prices marked without relying on colour alone |
 | Cell drawer | Supplier's words, document and location, each conversion step, flags (including unusually high or low prices), correction with reason, undo, comments, history |
 | Documents | Grouped by supplier, with filters and search; drag and drop files; assign supplier and kind; open the original |
@@ -111,10 +120,13 @@ Every tool accepts an optional `user_request`, the message that led to the call,
 - Scanned PDFs with no text layer are read by attaching them in the Claude chat; Bidline does no OCR, because that would be AI inside the app.
 - Demo data is fictional, and demo follow-ups go to the buyer's own address.
 - Single region today; data is not yet kept in India.
+- Notification emails go from each person's own connected mailbox to their own address; Bidline has no mail server of its own.
+- Automatic reminders and approval expiry run from a daily Vercel Cron job, which needs `CRON_SECRET` set.
+- Sign-in is throttled: 5 failed attempts per email, or 30 per network address, in 15 minutes.
 
 ### Next steps
 
-1. Ten founder-led pilots, measuring time saved per quote round.
+1. Ten pilots run by hand, measuring time saved per quote round.
 2. Per-user Claude sign-in for team rollouts.
 3. A supplier portal link so suppliers fill in missing prices themselves.
 4. Award to purchase order, then payment.
@@ -145,11 +157,20 @@ lib/audit*.ts             the audit log queries, labels and the seal check
 lib/approvals.ts          approval steps, separation of duties
 ```
 
-## Checks
+## Run it locally
 
 ```bash
 npm install
-vercel env pull .env.local --yes
+cp .env.example .env.local   # or: vercel env pull .env.local --yes
+npm run db:migrate           # creates the tables in your Postgres
+npm run dev                  # http://localhost:3000
+```
+
+For Claude to reach a local app, expose it with a tunnel (for example `cloudflared tunnel --url http://localhost:3000`) and set `APP_URL` to that address.
+
+## Checks
+
+```bash
 npm run verify        # no-AI check, types, lint, calculator check
 npm run test:mcp      # end-to-end through MCP and the database (needs a running app)
 ```
@@ -157,12 +178,4 @@ npm run test:mcp      # end-to-end through MCP and the database (needs a running
 - `npm run test:calc`: for the demo enquiry, all 150 supplier-by-line cells and every headline total match a reference snapshot to the rupee.
 - `scripts/mcp-e2e.ts`: a scripted MCP client creates the demo enquiry, submits five suppliers' readings, answers questionnaires, corrects and undoes a price, runs a second read, changes an exchange rate, chases, drafts an award and checks the approval page, then confirms all 150 cells after the round trip. It passes against production.
 
-## Limits, on purpose
-
-- Follow-ups are sent through the buyer's own mailbox (SMTP). On demo events they go to the buyer's own address, because demo suppliers are fictional.
-- On Claude Team and Enterprise, one connector link maps to one Bidline account; per-user sign-in (OAuth) is next.
-- A scanned PDF with no text layer is read by attaching it in the Claude chat; Bidline does no OCR because that would be AI inside the app.
-- Automatic reminders and approval expiry run from a daily Vercel Cron job, which needs `CRON_SECRET` set in the project.
-- Notification emails go from each person's own connected mailbox to their own address; Bidline has no mail server of its own.
-- Sign-in is throttled: 5 failed attempts per email, or 30 per network address, in 15 minutes.
-- All demo companies, people and prices are fictional.
+All demo companies, people and prices are fictional.
