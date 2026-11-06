@@ -87,7 +87,7 @@ export default function DocsPage() {
 
         <Doc id="connect" title="Connect Claude">
           <p>
-            Open <Link href="/connect" className={link}>Connect Claude</Link> and copy your private link. In Claude, go to Settings, then Connectors,
+            Open <Link href="/ask#connect" className={link}>Ask Claude</Link> and copy your private connector link. In Claude, go to Settings, then Connectors,
             then Add custom connector, and paste it. In a chat, switch Bidline on from the tools menu.
           </p>
           <p>

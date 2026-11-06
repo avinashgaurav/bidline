@@ -106,7 +106,7 @@ export default async function Home() {
       </header>
 
       {!connected ? (
-        <Link href="/connect" className="rise flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-night px-4 py-3 text-on-dark hover:bg-night-raised sm:px-5">
+        <Link href="/ask#connect" className="rise flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-night px-4 py-3 text-on-dark hover:bg-night-raised sm:px-5">
           <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-[#F6EEE8]"><ClaudeMark className="size-5" /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-[14.5px] font-medium">Connect your Claude to read supplier quotes</span>

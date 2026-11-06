@@ -137,7 +137,7 @@ function ClaudeSetup({ back, connected }: { back: React.ReactNode; connected: bo
       </div>
       {connected ? null : (
         <p className="rounded-xl bg-[#F6EEE8] px-4 py-3 text-[14px]">
-          First, connect Claude to Bidline: <a href="/connect" className="font-medium text-primary hover:underline">open Connect Claude</a> and follow the three steps. It takes about a minute.
+          First, connect Claude to Bidline: <a href="/ask#connect" className="font-medium text-primary hover:underline">copy your connector link on Ask Claude</a> and add it in Claude. It takes about a minute.
         </p>
       )}
       <div className="rounded-xl bg-muted p-4 text-[14px] leading-relaxed">

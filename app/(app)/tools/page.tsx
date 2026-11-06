@@ -35,7 +35,7 @@ export default async function ToolsPage() {
             ({roleLabel(user.role)} role{off.filter((t) => !t.startsWith("+")).length ? `, ${off.filter((t) => !t.startsWith("+")).length} switched off for the workspace` : ""}).{admin ? " As an admin you can switch any tool off for everyone." : ""}
           </p>
         </div>
-        <Link href="/connect" className={`inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-[13.5px] ${connected ? "bg-card ring-1 ring-border hover:bg-muted" : "bg-primary text-white hover:bg-primary/90"}`}>
+        <Link href="/ask#connect" className={`inline-flex h-9 items-center gap-2 rounded-lg px-3.5 text-[13.5px] ${connected ? "bg-card ring-1 ring-border hover:bg-muted" : "bg-primary text-white hover:bg-primary/90"}`}>
           <ClaudeMark className="size-4" color={connected ? undefined : "currentColor"} />{connected ? "Claude connected" : "Connect Claude"}
         </Link>
       </header>
@@ -56,7 +56,7 @@ export default async function ToolsPage() {
                     </span>
                   </span>
                   <span className="mt-0.5 block text-[13px] text-ink-secondary">{i.what}</span>
-                  {i.status === "live" && !on ? <Link href={i.key === "claude" ? "/connect" : "/settings#email"} className="mt-1 inline-block text-[13px] text-primary hover:underline">Set up</Link> : null}
+                  {i.status === "live" && !on ? <Link href={i.key === "claude" ? "/ask#connect" : "/settings#email"} className="mt-1 inline-block text-[13px] text-primary hover:underline">Set up</Link> : null}
                 </span>
               </li>
             );

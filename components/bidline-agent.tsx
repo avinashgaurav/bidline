@@ -73,7 +73,7 @@ export function BidlineAgent({ connected, events }: { connected: boolean; events
         {!connected ? (
           <div className="grid gap-3 p-4 text-[13.5px]">
             <p className="text-ink-secondary">The agent works through your own Claude. Connect it once and ask anything about your sourcing events, here or in a Claude chat.</p>
-            <Link href="/connect" onClick={() => setOpen(false)} className="inline-flex h-9 w-fit items-center rounded-lg bg-primary px-3.5 text-white hover:bg-primary/90">Connect Claude</Link>
+            <Link href="/ask#connect" onClick={() => setOpen(false)} className="inline-flex h-9 w-fit items-center rounded-lg bg-primary px-3.5 text-white hover:bg-primary/90">Connect Claude</Link>
           </div>
         ) : (
           <div className="grid max-h-[60vh] gap-3 overflow-y-auto p-4">
