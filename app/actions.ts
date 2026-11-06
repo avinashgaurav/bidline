@@ -9,7 +9,7 @@ import {
 } from "@/lib/auth";
 import { one, q } from "@/lib/db";
 import { logEvent } from "@/lib/events";
-import { BadInput, NotFound, resolveRfx } from "@/lib/rfx";
+import { BadInput, ME_CTE, NotFound, VISIBLE, resolveRfx } from "@/lib/rfx";
 import * as A from "@/lib/actions";
 import * as T from "@/lib/team";
 import * as W from "@/lib/workspace";
@@ -107,9 +107,13 @@ export async function regenerateTokenAction(): Promise<FormState> {
   return { ok: true, message: "New connector link created. Update it in Claude." };
 }
 
-/** Remember that this person answered the first-run question, so it is asked once per person. */
+/**
+ * Remember that this person answered the first-run question, so it is asked once per person.
+ * Never fails the caller: at worst the question is asked once more.
+ */
 const markStarted = (userId: string) =>
-  q(`update users set prefs = prefs || '{"started": true}'::jsonb where id = $1`, [userId]);
+  q(`update users set prefs = prefs || '{"started": true}'::jsonb where id = $1`, [userId])
+    .catch((e) => console.error("[markStarted]", e));
 
 export async function markStartedUI(): Promise<void> {
   const user = await requireUser();
@@ -122,7 +126,7 @@ export async function loadDemoAction(): Promise<FormState> {
     await A.requireWorkspacePerm(user.id, "edit");
     // Once per workspace, like the two smaller demos: a teammate who picks the demo just joins it.
     const have = await one(
-      "select 1 from rfx where workspace_id = (select workspace_id from users where id = $1) and created_via = 'demo' and title = $2 and archived_at is null limit 1",
+      `with ${ME_CTE} select 1 from rfx r, me where ${VISIBLE} and r.created_via = 'demo' and r.title = $2 and r.archived_at is null limit 1`,
       [user.id, DEMO_TITLE]);
     if (!have) await seedDemoRfx(user.id);
     await markStarted(user.id);

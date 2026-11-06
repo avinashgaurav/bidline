@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { spend } from "@/lib/analytics";
 import { listRfxs } from "@/lib/rfx";
@@ -10,16 +11,19 @@ import { BarList } from "@/components/bar-list";
 export const metadata = { title: "Spend analytics · Bidline" };
 export const maxDuration = 60;
 
-export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<{ event?: string }> }) {
+export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<{ event?: string | string[] }> }) {
   const user = await requireUser();
-  const { event } = await searchParams;
+  const raw = (await searchParams).event;
+  const event = Array.isArray(raw) ? raw[0] : raw;
   const events = (await listRfxs(user.id)).map((e) => ({ id: e.id, code: e.code, title: e.title, archived: Boolean(e.archived_at) }));
   // Only an event this person can see narrows the page; anything else falls back to all events.
   const picked = events.find((e) => e.id === event) ?? null;
+  // a stale or shared link to an event this person cannot see would look filtered but is not
+  if (event && !picked) redirect("/analytics");
   const s = await spend(user.id, picked?.id ?? null);
   const awarded = s.totals.awarded;
   const baseline = s.totals.baseline;
-  const planned = s.byEvent.filter((e) => e.awarded === null && !["closed"].includes(e.status)).reduce((a, e) => a + e.budget, 0);
+  const planned = s.byEvent.filter((e) => e.awarded === null && !e.archived && !["closed"].includes(e.status)).reduce((a, e) => a + e.budget, 0);
   const saved = baseline ? baseline - awarded : 0;
   const any = awarded > 0;
 

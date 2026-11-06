@@ -8,7 +8,7 @@ import { ME_CTE, VISIBLE } from "./rfx";
  */
 export interface Spend {
   totals: { awarded: number; baseline: number; awards: number };
-  byEvent: Array<{ id: string; code: string; title: string; budget: number; awarded: number | null; baseline: number | null; status: string }>;
+  byEvent: Array<{ id: string; code: string; title: string; budget: number; awarded: number | null; baseline: number | null; status: string; archived: boolean }>;
   byCategory: Array<{ category: string; awarded: number; baseline: number; lines: number }>;
   bySupplier: Array<{ supplier: string; awarded: number; lines: number; events: number }>;
   byMonth: Array<{ month: string; awarded: number; baseline: number; awards: number }>;
@@ -25,7 +25,7 @@ export async function spend(userId: string, rfxId: string | null = null): Promis
       select coalesce(sum((snapshot->>'totalInr')::numeric), 0)::float8 as awarded,
              coalesce(sum((snapshot->>'baselineForAwardedInr')::numeric), 0)::float8 as baseline, count(*)::int as awards from approved`, [userId, rfxId]),
     q<Spend["byEvent"][number]>(`${vis}
-      select v.id, v.code, v.title, v.status,
+      select v.id, v.code, v.title, v.status, v.archived_at is not null as archived,
         coalesce((select sum(l.qty * l.baseline_inr) from rfx_lines l where l.rfx_id = v.id), 0)::float8 as budget,
         (select (ap.snapshot->>'totalInr')::float8 from approved ap where ap.rfx_id = v.id) as awarded,
         (select (ap.snapshot->>'baselineForAwardedInr')::float8 from approved ap where ap.rfx_id = v.id) as baseline
