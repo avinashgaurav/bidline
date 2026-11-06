@@ -81,6 +81,6 @@ export const INTEGRATIONS: Array<{ key: string; name: string; what: string; stat
   { key: "gmail", name: "Gmail and Outlook sign-in", what: "Connect a mailbox with one click instead of an app password, and pick up supplier replies.", status: "planned" },
   { key: "whatsapp", name: "WhatsApp Business", what: "Send follow-ups where many suppliers reply first.", status: "planned" },
   { key: "erp", name: "Tally, Zoho Books and SAP", what: "Turn an approved award into purchase-order lines in your accounts system.", status: "planned" },
-  { key: "slack", name: "Slack and Microsoft Teams", what: "Tell the approver an award is waiting, and post when quotes arrive.", status: "planned" },
+  { key: "slack", name: "Slack and Teams app", what: "Approve awards and answer questions inside Slack or Teams. Alerts to a Slack, Teams or webhook channel already work (Settings, Integrations).", status: "planned" },
   { key: "sso", name: "Single sign-on (Google, Microsoft, Okta)", what: "Sign in with your company account; admins control who gets in.", status: "planned" },
 ];
