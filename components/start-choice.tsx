@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Copy, FileSpreadsheet, FolderOpen, LayoutTemplate, PencilLine } from "lucide-react";
-import { createFromTemplateUI, createRfxUI, listTemplatesUI, loadDemoAction, type FormState } from "@/app/actions";
+import { createFromTemplateUI, createRfxUI, listTemplatesUI, loadDemoAction, markStartedUI, type FormState } from "@/app/actions";
 import type { Template } from "@/lib/templates";
 import { ClaudeMark } from "@/components/claude-mark";
 import { Field, FormMessage, SubmitButton, fieldClass } from "@/components/form-bits";
@@ -45,7 +45,7 @@ export function StartChoice({ heading = "How do you want to start?" }: { heading
           {own ? (
             <>
               <Choice icon={<ClaudeMark className="size-5" />} tint="bg-[#F6EEE8]" title="Tell Claude what you are buying"
-                text="Describe the purchase in a Claude chat. Claude creates the event here with line items and suppliers." onClick={() => setStage("claude")} />
+                text="Describe the purchase in a Claude chat. Claude creates the event here with line items and suppliers." onClick={() => { setStage("claude"); markStartedUI().catch(() => {}); }} />
               <Choice icon={<PencilLine className="size-5 text-primary" />} title="Fill in a short form here"
                 text="Name the purchase, set a due date and approver. Add line items and suppliers after." onClick={() => setStage("form")} />
               {templates.length ? (

@@ -249,7 +249,7 @@ function AccountMenu({ user, workspace, workspaces, connected, switchAction, log
           {workspaces.length > 1 ? (
             <form action={switchAction} className="grid">
               <select name="workspace" defaultValue={workspaces.find((w) => w.name === workspace.name)?.id} onChange={(e) => e.currentTarget.form?.requestSubmit()}
-                aria-label="Switch organisation" className="h-9 rounded-lg bg-night px-2.5 text-[13px] text-on-dark ring-1 ring-white/10 outline-none">
+                aria-label="Switch organisation" className="h-9 rounded-lg bg-night px-2.5 text-[13px] text-on-dark ring-1 ring-white/10 outline-none focus-visible:ring-2 focus-visible:ring-[#aab4ff]">
                 {workspaces.map((w) => <option key={w.id} value={w.id}>{w.name} · {roleLabel(w.role)}</option>)}
               </select>
             </form>

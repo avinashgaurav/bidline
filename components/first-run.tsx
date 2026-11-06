@@ -5,6 +5,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { X } from "lucide-react";
 import { StartChoice } from "@/components/start-choice";
 import { ConnectStep } from "@/components/onboarding";
+import { markStartedUI } from "@/app/actions";
 
 // "Skip" is remembered per person, so a teammate on the same browser still sees the step.
 const keyFor = (userId: string) => `bidline:connect-skipped:${userId}`;
@@ -31,12 +32,13 @@ const subscribe = (l: () => void) => {
 
 /**
  * The first run, one question at a time, as popups over the dashboard:
- *   1. demo data or your own files
+ *   1. demo data or your own files: asked once to every person who can edit,
+ *      even when the workspace already has events or Claude is connected
  *   2. connect Claude (skippable)
  * then the organisation dashboard. "New sourcing event" anywhere reopens step 1.
  */
-export function FirstRun({ hasEvents, canEdit, connected, connectorUrl, userId }: {
-  hasEvents: boolean; canEdit: boolean; connected: boolean; connectorUrl: string; userId: string;
+export function FirstRun({ started, hasEvents, canEdit, connected, connectorUrl, userId }: {
+  started: boolean; hasEvents: boolean; canEdit: boolean; connected: boolean; connectorUrl: string; userId: string;
 }) {
   const router = useRouter();
   const path = usePathname();
@@ -47,7 +49,7 @@ export function FirstRun({ hasEvents, canEdit, connected, connectorUrl, userId }
   const [closedConnect, setClosedConnect] = useState(false);
 
   const wantsNew = sp.get("new") === "1";
-  const showStart = canEdit && !closedStart && (wantsNew || (!hasEvents && path === "/" && !sp.get("welcome")));
+  const showStart = canEdit && !closedStart && (wantsNew || (!started && !sp.get("welcome")));
   // keep the connect card on screen after the first call lands, until the person moves on
   const [justConnected, setJustConnected] = useState(false);
   const isConnected = connected || justConnected;
@@ -60,6 +62,7 @@ export function FirstRun({ hasEvents, canEdit, connected, connectorUrl, userId }
   };
   const closeStart = () => {
     setClosedStart(true);
+    if (!started) markStartedUI().catch(() => {});
     clearParams();
   };
   const closeConnect = (skip: boolean) => {
@@ -71,8 +74,8 @@ export function FirstRun({ hasEvents, canEdit, connected, connectorUrl, userId }
   if (showStart) {
     return (
       <Modal label="Start a sourcing event" onClose={hasEvents || wantsNew ? closeStart : undefined}>
-        <p className="mb-1.5 text-[12px] font-medium tracking-[0.06em] text-ink-secondary uppercase">{hasEvents ? "New sourcing event" : "Step 1 of 2"}</p>
-        <StartChoice heading={hasEvents ? "How do you want to start this one?" : "How would you like to start?"} />
+        <p className="mb-1.5 text-[12px] font-medium tracking-[0.06em] text-ink-secondary uppercase">{wantsNew ? "New sourcing event" : "Step 1 of 2"}</p>
+        <StartChoice heading={wantsNew ? "How do you want to start this one?" : "How would you like to start?"} />
       </Modal>
     );
   }

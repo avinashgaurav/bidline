@@ -139,7 +139,7 @@ export function OverviewTab({ cmp }: { cmp: Comparison }) {
                     <span className="absolute left-1/2 pl-2 text-xs leading-5 text-ink-secondary">No comparable prices</span>
                   ) : (
                     <Tip text={<>{r.full}: quoted {inr(r.quoted)} against a budget of {inr(r.budget)} on {r.priced} line{r.priced === 1 ? "" : "s"}. {pct(r.delta)}.</>}>
-                      <span tabIndex={0} className="absolute inset-y-0 outline-none"
+                      <span tabIndex={0} className="absolute inset-y-0 outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
                         style={r.delta < 0
                           ? { right: "50%", width: `${(Math.abs(r.delta) / span) * 38}%` }
                           : { left: "50%", width: `${(r.delta / span) * 38}%` }}>
@@ -165,7 +165,7 @@ export function OverviewTab({ cmp }: { cmp: Comparison }) {
             {[...rows].sort((a, b) => b.won - a.won).map((r) => (
               <Row key={r.code} label={r.name} code={r.code}>
                 <Tip text={`${r.full} is cheapest on ${r.won} line${r.won === 1 ? "" : "s"}.`}>
-                  <span tabIndex={0} className="flex h-5 items-center gap-1.5 outline-none">
+                  <span tabIndex={0} className="flex h-5 items-center gap-1.5 outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
                     <span className="h-4 rounded-r-[4px] hover:opacity-85" style={{ width: `${(r.won / maxWon) * 85}%`, minWidth: r.won ? 3 : 0, background: C.bar }} />
                     <span className="num text-xs">{r.won}</span>
                   </span>
@@ -187,7 +187,7 @@ export function OverviewTab({ cmp }: { cmp: Comparison }) {
                 <span className="flex h-5 gap-[2px]">
                   {(["comparable", "caveat", "review", "missing"] as Kind[]).filter((k) => r.counts[k]).map((k, i, arr) => (
                     <Tip key={k} text={`${r.full}: ${r.counts[k]} ${KIND[k].label.toLowerCase()}. ${KIND[k].help}`}>
-                      <span tabIndex={0} className="grid h-full place-items-center text-[11px] text-white outline-none hover:opacity-85"
+                      <span tabIndex={0} className="grid h-full place-items-center text-[11px] text-white outline-none focus-visible:ring-2 focus-visible:ring-primary/60 hover:opacity-85"
                         style={{
                           width: `${(r.counts[k] / lines.length) * 100}%`, background: k === "missing" ? HATCH : C[k],
                           borderRadius: `${i === 0 ? 4 : 0}px ${i === arr.length - 1 ? 4 : 0}px ${i === arr.length - 1 ? 4 : 0}px ${i === 0 ? 4 : 0}px`,
@@ -213,7 +213,7 @@ export function OverviewTab({ cmp }: { cmp: Comparison }) {
             {cats.map((c) => (
               <Row key={c.name} label={c.name} wide>
                 <Tip text={c.priced ? `${c.name}: lowest ${inr(c.lowest)} against a budget of ${inr(c.budget)} on ${c.priced} of ${c.total} lines.` : `${c.name}: no line in this category has both a price and a budget yet.`}>
-                  <span tabIndex={0} className="relative flex h-5 items-center outline-none">
+                  <span tabIndex={0} className="relative flex h-5 items-center outline-none focus-visible:ring-2 focus-visible:ring-primary/60">
                     <span className="h-4 rounded-r-[4px] hover:opacity-85" style={{ width: `${(c.lowest / maxCat) * 82}%`, minWidth: c.lowest ? 3 : 0, background: C.bar }} />
                     {c.budget ? <span aria-hidden className="absolute inset-y-0 w-[2px] rounded" style={{ left: `${(c.budget / maxCat) * 82}%`, background: C.budget }} /> : null}
                     <span className={`num ml-auto pl-2 text-xs whitespace-nowrap ${c.priced ? "" : "text-ink-secondary"}`}>{c.priced ? inrShort(c.lowest) : "No budget set"}</span>
