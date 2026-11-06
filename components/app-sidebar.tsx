@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState, useSyncExternalStore } from "react";
 import {
-  Archive, BarChart3, BellDot, BookOpen, Building2, ChevronDown, ChevronRight, History, Home, LogOut, Menu, Pin, PinOff, Plug,
+  Archive, BarChart3, BellDot, BookOpen, Building2, ChevronDown, ChevronRight, History, Home, LogOut, Menu, Pin, PinOff,
   Search, Settings, Shield, Stamp, Star, Users, Wrench,
 } from "lucide-react";
 import { Logo } from "@/components/brand";
@@ -106,7 +106,9 @@ function SidebarBody({ user, workspace, workspaces, events, connected, switchAct
   const adminTab = path === "/settings" ? sp.get("tab") ?? "profile" : null;
   const activeId = path.startsWith("/rfx/") ? path.split("/")[2] : null;
   // Pins belong to one person in one workspace.
-  const [pins, setPins] = usePrefs<string[]>(`bidline:pins:v1:${user.email}:${workspace.name}`, ["view:attention", "audit"]);
+  const [savedPins, setPins] = usePrefs<string[]>(`bidline:pins:v1:${user.email}:${workspace.name}`, ["view:attention", "audit"]);
+  // "Connect Claude" now lives on Ask Claude, so an old pin of it becomes a pin of Ask Claude.
+  const pins = [...new Set(savedPins.map((k) => (k === "connect" ? "ask" : k)))];
   // One section open at a time; the one holding the current page opens itself.
   const [openSec, setOpenSec] = usePrefs<string | null>("bidline:open-section", "sourcing");
   const [drag, setDrag] = useState<number | null>(null);
@@ -130,9 +132,9 @@ function SidebarBody({ user, workspace, workspaces, events, connected, switchAct
       ...(user.role !== "viewer" ? [{ key: "audit", href: "/audit", label: "Audit log", icon: <History className={ic} />, active: path.startsWith("/audit") }] : []),
     ] },
     { key: "claude", label: "Claude", items: [
-      { key: "ask", href: "/ask", label: "Ask Claude", icon: <ClaudeMark className={ic} color="currentColor" />, active: path.startsWith("/ask") },
+      // Ask Claude also holds the connector, so it carries the "not connected" warning.
+      { key: "ask", href: "/ask", label: "Ask Claude", icon: <ClaudeMark className={ic} color="currentColor" />, active: path.startsWith("/ask"), warn: !connected },
       { key: "tools", href: "/tools", label: "Tools and integrations", icon: <Wrench className={ic} />, active: path.startsWith("/tools") },
-      { key: "connect", href: "/connect", label: connected ? "Claude connection" : "Connect Claude", icon: <Plug className={ic} />, active: path.startsWith("/connect"), warn: !connected },
     ] },
     ...(can(user.role, "team") ? [{ key: "admin", label: "Organisation", items: [
       { key: "admin:team", href: "/settings?tab=team", label: "Team and roles", icon: <Users className={ic} />, active: adminTab === "team" },
@@ -258,7 +260,7 @@ function AccountMenu({ user, workspace, workspaces, connected, switchAction, log
           )}
         </div>
         <div className="grid p-1.5 text-[13.5px]">
-          <MenuLink href="/connect" icon={<ClaudeMark className="size-4" />} label={connected ? "Claude connected" : "Connect Claude"} />
+          <MenuLink href="/ask#connect" icon={<ClaudeMark className="size-4" />} label={connected ? "Claude connected" : "Connect Claude"} />
           <MenuLink href="/settings" icon={<Settings className="size-4" />} label="Settings" />
           {can(user.role, "team") ? <MenuLink href="/settings?tab=team" icon={<Users className="size-4" />} label="Invite people" /> : null}
           <MenuLink href="/docs" icon={<BookOpen className="size-4" />} label="Help and docs" />

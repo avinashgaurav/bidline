@@ -12,6 +12,9 @@ import { readPrefs } from "@/lib/prefs";
 import { AdminPanel } from "@/components/admin/panel";
 import { ChannelForm, ChannelRow, ReadOnlyLink } from "@/components/settings/extra";
 import { CHANNEL_KINDS, listChannels } from "@/lib/channels";
+import { fileSize, fileTotalsByEvent } from "@/lib/storage";
+import { MAX_UPLOAD_BYTES } from "@/lib/files";
+import { EventFilesList } from "@/components/event-files";
 
 export const metadata = { title: "Settings · Bidline" };
 export const maxDuration = 60;
@@ -22,6 +25,7 @@ const PERSONAL = [
   ["notifications", "Notifications"],
   ["integrations", "Integrations"],
   ["claude", "API and Claude"],
+  ["storage", "Storage"],
 ] as const;
 const ADMIN = [
   ["organisation", "Organisation"],
@@ -36,13 +40,16 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const { tab: t } = await searchParams;
   const tabs = [...PERSONAL, ...(admin ? ADMIN : [])];
   const tab = tabs.some(([k]) => k === t) ? t! : "profile";
-  const [me, account, base, channels] = await Promise.all([
+  const [me, account, base, channels, files] = await Promise.all([
     one<{ company: string | null; job_title: string | null; followup_days: number; default_approver_name: string | null; default_approver_email: string | null; notify: unknown; mcp_token_ro: string | null; prefs: unknown }>(
       "select company, job_title, followup_days, default_approver_name, default_approver_email, notify, mcp_token_ro, prefs from users where id = $1", [user.id]),
     getEmailAccount(user.id),
     appUrlFromHeaders(),
     admin ? listChannels(user.workspace_id) : Promise.resolve([]),
+    tab === "storage" ? fileTotalsByEvent(user.id) : Promise.resolve([]),
   ]);
+  const fileCount = files.reduce((a, e) => a + e.files, 0);
+  const totalBytes = files.reduce((a, e) => a + e.bytes, 0);
 
   return (
     <div className="grid gap-5">
@@ -110,6 +117,16 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <ReadOnlyLink url={me?.mcp_token_ro ? `${base}/mcp/${me.mcp_token_ro}` : null} />
             </Section>
           ) : null}
+          {tab === "storage" ? (
+            <Section id="storage" title="Storage" text={`Every supplier file stored on the sourcing events you can open, by event. Files are private to your workspace and served only to people who can open the event. Uploads can be up to ${fileSize(MAX_UPLOAD_BYTES)} each.`}>
+              <div className="grid gap-px overflow-hidden rounded-lg bg-border ring-1 ring-border sm:grid-cols-3">
+                <Stat label="Files" value={String(fileCount)} />
+                <Stat label="Size of these files" value={fileSize(totalBytes)} />
+                <Stat label="Events with files" value={String(files.length)} />
+              </div>
+              <EventFilesList events={files} showSizes />
+            </Section>
+          ) : null}
           {admin && ADMIN.some(([k]) => k === tab) ? <AdminPanel user={user} tab={tab} /> : null}
         </div>
       </div>
@@ -121,6 +138,15 @@ function TabLink({ k, l, on }: { k: string; l: string; on: boolean }) {
   return (
     <Link href={`/settings?tab=${k}`} aria-current={on ? "page" : undefined}
       className={`shrink-0 rounded-lg px-2.5 py-1.5 text-[13.5px] whitespace-nowrap ${on ? "bg-secondary text-foreground" : "text-ink-secondary hover:bg-muted hover:text-foreground"}`}>{l}</Link>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-card px-4 py-3">
+      <p className="text-[12px] text-ink-secondary">{label}</p>
+      <p className="num mt-0.5 text-[20px] leading-tight">{value}</p>
+    </div>
   );
 }
 
