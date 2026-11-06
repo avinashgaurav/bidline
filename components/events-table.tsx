@@ -96,13 +96,13 @@ export function EventsTable({ events, view, canEdit, initial }: {
           {text ? <button onClick={() => setText("")} aria-label="Clear search" className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-ink-secondary hover:text-foreground"><X className="size-3.5" /></button> : null}
         </label>
         {owners.length > 1 ? (
-          <select value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Owner" className="h-9 rounded-lg bg-card px-3 text-[13.5px] ring-1 ring-border outline-none">
+          <select value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Owner" className="h-9 rounded-lg bg-card px-3 text-[13.5px] ring-1 ring-border outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
             <option value="">Everyone</option>
             {owners.map((o) => <option key={o} value={o}>{o}</option>)}
           </select>
         ) : null}
         <div className="flex items-center gap-1">
-          <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort by" className="h-9 rounded-lg bg-card px-3 text-[13.5px] ring-1 ring-border outline-none">
+          <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort by" className="h-9 rounded-lg bg-card px-3 text-[13.5px] ring-1 ring-border outline-none focus-visible:ring-2 focus-visible:ring-primary/50">
             {SORTS.map(([k, l]) => <option key={k} value={k}>Sort: {l}</option>)}
           </select>
           <button onClick={() => setAsc(!asc)} aria-label={asc ? "Ascending" : "Descending"} className="grid size-9 place-items-center rounded-lg bg-card ring-1 ring-border hover:bg-muted">

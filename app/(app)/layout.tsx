@@ -24,6 +24,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     one<{ prefs: unknown }>("select prefs from users where id = $1", [user.id]).catch(() => null),
   ]);
   const prefs = readPrefs(prefRow?.prefs);
+  // Has this person answered "demo or own files" yet? If the read fails, do not nag.
+  const started = prefRow ? (prefRow.prefs as { started?: boolean } | null)?.started === true : true;
   const sidebarEvents = events.map((e) => ({
     id: e.id, code: e.code, title: e.title, status: e.status, restricted: e.restricted, archived_at: e.archived_at,
     line_count: e.line_count, supplier_count: e.supplier_count, responded: e.responded, doc_count: e.doc_count, unread_docs: e.unread_docs,
@@ -60,7 +62,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </div>
       <CommandMenu />
       <Suspense>
-        <FirstRun userId={user.id} hasEvents={events.length > 0} canEdit={can(user.role, "edit")} connected={Boolean(user.last_mcp_at)} connectorUrl={`${base}/mcp/${user.mcp_token}`} />
+        <FirstRun userId={user.id} started={started} hasEvents={events.length > 0} canEdit={can(user.role, "edit")} connected={Boolean(user.last_mcp_at)} connectorUrl={`${base}/mcp/${user.mcp_token}`} />
       </Suspense>
       <LiveRefresh initial={version} />
       <BidlineAgent connected={Boolean(user.last_mcp_at)} events={events.map((e) => ({ id: e.id, code: e.code }))} />

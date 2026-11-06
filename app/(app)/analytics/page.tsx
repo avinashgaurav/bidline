@@ -1,6 +1,9 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { requireUser } from "@/lib/auth";
 import { spend } from "@/lib/analytics";
+import { listRfxs } from "@/lib/rfx";
+import { EventFilter } from "@/components/event-filter";
 import { CountUp } from "@/components/count-up";
 import { InfoTip } from "@/components/tip";
 import { BarList } from "@/components/bar-list";
@@ -8,20 +11,30 @@ import { BarList } from "@/components/bar-list";
 export const metadata = { title: "Spend analytics · Bidline" };
 export const maxDuration = 60;
 
-export default async function AnalyticsPage() {
+export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<{ event?: string | string[] }> }) {
   const user = await requireUser();
-  const s = await spend(user.id);
+  const raw = (await searchParams).event;
+  const event = Array.isArray(raw) ? raw[0] : raw;
+  const events = (await listRfxs(user.id)).map((e) => ({ id: e.id, code: e.code, title: e.title, archived: Boolean(e.archived_at) }));
+  // Only an event this person can see narrows the page; anything else falls back to all events.
+  const picked = events.find((e) => e.id === event) ?? null;
+  // a stale or shared link to an event this person cannot see would look filtered but is not
+  if (event && !picked) redirect("/analytics");
+  const s = await spend(user.id, picked?.id ?? null);
   const awarded = s.totals.awarded;
   const baseline = s.totals.baseline;
-  const planned = s.byEvent.filter((e) => e.awarded === null && !["closed"].includes(e.status)).reduce((a, e) => a + e.budget, 0);
+  const planned = s.byEvent.filter((e) => e.awarded === null && !e.archived && !["closed"].includes(e.status)).reduce((a, e) => a + e.budget, 0);
   const saved = baseline ? baseline - awarded : 0;
   const any = awarded > 0;
 
   return (
     <div className="grid gap-5">
-      <header>
-        <h1 className="text-[24px] leading-tight tracking-[-0.01em]">Spend analytics</h1>
-        <p className="mt-1 max-w-[72ch] text-[14px] text-ink-secondary">What has been committed through approved awards, against the budget you set on each line, and what is still planned. Figures come from each award&apos;s snapshot, so they match the note the approver signed off.</p>
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-[24px] leading-tight tracking-[-0.01em]">Spend analytics</h1>
+          <p className="mt-1 max-w-[72ch] text-[14px] text-ink-secondary">What has been committed through approved awards, against the budget you set on each line, and what is still planned. Figures come from each award&apos;s snapshot, so they match the note the approver signed off.</p>
+        </div>
+        <EventFilter events={events} value={picked?.id ?? ""} />
       </header>
 
       <section className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border ring-1 ring-border lg:grid-cols-4">
@@ -33,14 +46,14 @@ export default async function AnalyticsPage() {
 
       {!any ? (
         <p className="rounded-xl bg-card px-4 py-8 text-center text-[14px] text-ink-secondary ring-1 ring-border">
-          No approved awards yet. Once an approver signs off an award, its spend shows here by category, supplier and month. <Link href="/events" className="text-primary hover:underline">Go to sourcing events</Link>
+          {picked ? `No approved award on ${picked.code} yet. Once an approver signs it off, its spend shows here by category, supplier and month.` : "No approved awards yet. Once an approver signs off an award, its spend shows here by category, supplier and month."} <Link href="/events" className="text-primary hover:underline">Go to sourcing events</Link>
         </p>
       ) : (
         <div className="grid gap-5 lg:grid-cols-2">
           <Card title="Awarded against budget, by category" note="Bars show awarded value; the grey mark is the budget for the same lines.">
             <BarList rows={s.byCategory.map((c) => ({ label: c.category, value: c.awarded, ref: c.baseline, meta: `${c.lines} line${c.lines === 1 ? "" : "s"}` }))} />
           </Card>
-          <Card title="Awarded by supplier" note="Approved awards only, across all events.">
+          <Card title="Awarded by supplier" note={picked ? `Approved award on ${picked.code}.` : "Approved awards only, across all events."}>
             <BarList rows={s.bySupplier.map((x) => ({ label: x.supplier, value: x.awarded, meta: `${x.lines} lines · ${x.events} event${x.events === 1 ? "" : "s"}` }))} />
           </Card>
           <Card title="By event" note="Budget for the whole event, and the approved award where there is one.">

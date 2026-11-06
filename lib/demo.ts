@@ -58,6 +58,9 @@ async function sharedSample(path: string) {
   }
 }
 
+/** The main demo event's title, used to load it only once per workspace. */
+export const DEMO_TITLE = catalog.rfx.title;
+
 export async function seedDemoRfx(userId: string): Promise<string> {
   const r = catalog.rfx;
   const rfx = await createRfx(userId, {

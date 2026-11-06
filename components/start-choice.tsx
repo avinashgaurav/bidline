@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Copy, FileSpreadsheet, FolderOpen, LayoutTemplate, PencilLine } from "lucide-react";
-import { createFromTemplateUI, createRfxUI, listTemplatesUI, loadDemoAction, type FormState } from "@/app/actions";
+import { createFromTemplateUI, createRfxUI, listTemplatesUI, loadDemoAction, markStartedUI, type FormState } from "@/app/actions";
 import type { Template } from "@/lib/templates";
 import { ClaudeMark } from "@/components/claude-mark";
 import { Field, FormMessage, SubmitButton, fieldClass } from "@/components/form-bits";
@@ -14,7 +14,9 @@ type Stage = "ask" | "demo" | "own" | "claude" | "form" | "template";
  * Starting a sourcing event as one question at a time: demo data or your own
  * files first, and only then how to set your own one up.
  */
-export function StartChoice({ heading = "How do you want to start?" }: { heading?: string }) {
+export function StartChoice({ heading = "How do you want to start?", connected = true, onTellClaude }: {
+  heading?: string; connected?: boolean; onTellClaude?: () => void;
+}) {
   const [stage, setStage] = useState<Stage>("ask");
   const [templates, setTemplates] = useState<Template[]>([]);
   useEffect(() => {
@@ -45,7 +47,7 @@ export function StartChoice({ heading = "How do you want to start?" }: { heading
           {own ? (
             <>
               <Choice icon={<ClaudeMark className="size-5" />} tint="bg-[#F6EEE8]" title="Tell Claude what you are buying"
-                text="Describe the purchase in a Claude chat. Claude creates the event here with line items and suppliers." onClick={() => setStage("claude")} />
+                text="Describe the purchase in a Claude chat. Claude creates the event here with line items and suppliers." onClick={() => { setStage("claude"); onTellClaude?.(); markStartedUI().catch(() => {}); }} />
               <Choice icon={<PencilLine className="size-5 text-primary" />} title="Fill in a short form here"
                 text="Name the purchase, set a due date and approver. Add line items and suppliers after." onClick={() => setStage("form")} />
               {templates.length ? (
@@ -68,7 +70,7 @@ export function StartChoice({ heading = "How do you want to start?" }: { heading
   }
 
   if (stage === "demo") return <DemoConfirm back={back("ask")} />;
-  if (stage === "claude") return <ClaudeSetup back={back("own")} />;
+  if (stage === "claude") return <ClaudeSetup back={back("own")} connected={connected} />;
   if (stage === "template") return <TemplateSetup back={back("own")} templates={templates} />;
   return <FormSetup back={back("own")} />;
 }
@@ -124,7 +126,7 @@ function DemoConfirm({ back }: { back: React.ReactNode }) {
   );
 }
 
-function ClaudeSetup({ back }: { back: React.ReactNode }) {
+function ClaudeSetup({ back, connected }: { back: React.ReactNode; connected: boolean }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="grid gap-5">
@@ -133,6 +135,11 @@ function ClaudeSetup({ back }: { back: React.ReactNode }) {
         <h2 className="mt-3 text-[24px] leading-tight">Tell Claude what you are buying</h2>
         <p className="mt-1 text-[15px] text-ink-secondary">Copy this example, change the details to your purchase and send it in a Claude chat with Bidline switched on. The event appears here by itself.</p>
       </div>
+      {connected ? null : (
+        <p className="rounded-xl bg-[#F6EEE8] px-4 py-3 text-[14px]">
+          First, connect Claude to Bidline: <a href="/connect" className="font-medium text-primary hover:underline">open Connect Claude</a> and follow the three steps. It takes about a minute.
+        </p>
+      )}
       <div className="rounded-xl bg-muted p-4 text-[14px] leading-relaxed">
         &ldquo;{OWN_DATA_PROMPT}&rdquo;
       </div>

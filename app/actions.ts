@@ -9,7 +9,7 @@ import {
 } from "@/lib/auth";
 import { one, q } from "@/lib/db";
 import { logEvent } from "@/lib/events";
-import { BadInput, NotFound, resolveRfx } from "@/lib/rfx";
+import { BadInput, ME_CTE, NotFound, VISIBLE, resolveRfx } from "@/lib/rfx";
 import * as A from "@/lib/actions";
 import * as T from "@/lib/team";
 import * as W from "@/lib/workspace";
@@ -20,7 +20,7 @@ import { setTodo } from "@/lib/todo-state";
 import { readPrefs } from "@/lib/prefs";
 import { createFromTemplate, deleteTemplate, listTemplates, saveTemplate } from "@/lib/templates";
 import * as C from "@/lib/channels";
-import { seedDemoRfx } from "@/lib/demo";
+import { DEMO_TITLE, seedDemoRfx } from "@/lib/demo";
 import { seedExtraDemos } from "@/lib/demo-extra";
 import { disconnectEmail, getEmailAccount, saveEmailAccount, sendMail } from "@/lib/mail";
 
@@ -107,11 +107,29 @@ export async function regenerateTokenAction(): Promise<FormState> {
   return { ok: true, message: "New connector link created. Update it in Claude." };
 }
 
+/**
+ * Remember that this person answered the first-run question, so it is asked once per person.
+ * Never fails the caller: at worst the question is asked once more.
+ */
+const markStarted = (userId: string) =>
+  q(`update users set prefs = prefs || '{"started": true}'::jsonb where id = $1`, [userId])
+    .catch((e) => console.error("[markStarted]", e));
+
+export async function markStartedUI(): Promise<void> {
+  const user = await requireUser();
+  await markStarted(user.id);
+}
+
 export async function loadDemoAction(): Promise<FormState> {
   const user = await requireUser();
   try {
     await A.requireWorkspacePerm(user.id, "edit");
-    await seedDemoRfx(user.id);
+    // Once per workspace, like the two smaller demos: a teammate who picks the demo just joins it.
+    const have = await one(
+      `with ${ME_CTE} select 1 from rfx r, me where ${VISIBLE} and r.created_via = 'demo' and r.title = $2 and r.archived_at is null limit 1`,
+      [user.id, DEMO_TITLE]);
+    if (!have) await seedDemoRfx(user.id);
+    await markStarted(user.id);
     // Two smaller events beside it, added just after the page opens; the dashboard updates itself when they land.
     after(() => seedExtraDemos(user.id).catch((e) => console.error("[demo-extra]", e)));
   } catch (e) {
@@ -142,6 +160,7 @@ export async function createRfxUI(_: FormState, f: FormData): Promise<FormState>
       approver: { name: str(f, "approver") || me?.default_approver_name || null, email: me?.default_approver_email ?? null },
     });
     id = r.rfx.id;
+    await markStarted(ctx.userId);
   });
   if (res.error) return res;
   revalidatePath("/", "layout");
@@ -575,7 +594,10 @@ export async function listTemplatesUI() {
 
 export async function createFromTemplateUI(_: FormState, f: FormData): Promise<FormState> {
   let id = "";
-  const res = await act(async (ctx) => { id = (await createFromTemplate(ctx, str(f, "template"), { title: str(f, "title") || null, dueDate: str(f, "dueDate") || null })).rfx.id; });
+  const res = await act(async (ctx) => {
+    id = (await createFromTemplate(ctx, str(f, "template"), { title: str(f, "title") || null, dueDate: str(f, "dueDate") || null })).rfx.id;
+    await markStarted(ctx.userId);
+  });
   if (res.error) return res;
   revalidatePath("/", "layout");
   redirect(`/rfx/${id}?tab=lines`);
@@ -588,6 +610,6 @@ export async function deleteTemplateUI(id: string): Promise<FormState> {
 export async function savePrefsUI(_: FormState, f: FormData): Promise<FormState> {
   return guarded(async (uid) => {
     const prefs = readPrefs({ numberFormat: str(f, "numberFormat"), dateFormat: str(f, "dateFormat"), timeZone: str(f, "timeZone") });
-    await q("update users set prefs = $2::jsonb where id = $1", [uid, JSON.stringify(prefs)]);
+    await q("update users set prefs = prefs || $2::jsonb where id = $1", [uid, JSON.stringify(prefs)]);
   }, "Preferences saved.");
 }

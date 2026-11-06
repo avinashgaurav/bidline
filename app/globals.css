@@ -209,10 +209,14 @@
   color: var(--ink-secondary);
 }
 
-:where(a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"]), [role="button"]):focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-  border-radius: 8px;
+/* The default keyboard ring. It sits in the base layer so a control that draws its own ring
+   (outline-none plus focus-visible:ring) shows one ring, not two. */
+@layer base {
+  :where(a, button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"]), [role="button"]):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
 }
 
 .prose-note h1 { font-size: 24px; margin: 0 0 8px; }
