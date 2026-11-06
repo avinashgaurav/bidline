@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Supplier quote comparison that runs on your own Claude via MCP. Claude reads the quotes; Bidline does the maths, keeps the record and gets it approved. No AI inside.",
+  "license": "MIT",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
